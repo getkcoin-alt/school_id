@@ -85,7 +85,7 @@
   .price tr.sub td { background: #fff; font-weight: 600; }
   .price tr.total td { background: var(--navy) !important; color: #fff; font-weight: 800; font-size: 12pt; border: 0; }
   .free { display: inline-block; font-size: 7.6pt; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: #0f7a43; background: #e3f6ec; padding: .6mm 2.2mm; border-radius: 3px; }
-  .phase { display: grid; grid-template-columns: 22mm 1fr 26mm; gap: 4mm; padding: 3mm 0; border-bottom: 1px solid var(--line); }
+  .phase { display: grid; grid-template-columns: 26mm 1fr 26mm; gap: 4mm; padding: 2.2mm 0; border-bottom: 1px solid var(--line); }
   .phase .wk { font-weight: 700; color: var(--coral); }
   .phase .out { text-align: right; font-size: 8.6pt; color: var(--muted); }
 
@@ -118,7 +118,7 @@
   <div class="mid">
     <div class="kicker">Project Proposal</div>
     <h1>ID CARD STUDIO<br />SCHOOL ID PLATFORM UPGRADE</h1>
-    <p class="sub">Modern redesign, three role panels, student onboarding links, activity logs and Linux server deployment, plus a complimentary portfolio website.</p>
+    <p class="sub">Modern redesign, three role panels, student onboarding links, and activity logs, plus a complimentary portfolio website.</p>
   </div>
   <div class="parties">
     <div class="party client">
@@ -149,7 +149,7 @@
   <section>
     <p>Dear Mr. Sunil Kumar,</p>
     <p>Thank you for choosing Scriza again. This proposal covers the upgraded <b>ID Card Studio</b> school ID platform. It keeps every feature of the ID Studio project we delivered earlier and adds a modern, user-friendly design, a user guide, a new student onboarding link module (alongside the existing Excel upload) and user activity logs.</p>
-    <p>Because the project is urgent, <b>development has already started</b>. If payment is received <b>today, 8 November 2026</b>, the complete project will be delivered <b>by 11 November 2026</b>. The only work left is setting up your Linux server and deploying the software on it.</p>
+    <p>Because the project is urgent, <b>development has already started</b>. If payment is received <b>today, 8 November 2026</b>, the complete project will be delivered <b>by 11 November 2026</b>. Server setup and deployment are not part of this proposal. They are quoted separately after delivery, because the cost depends on the server chosen.</p>
   </section>
 
   <section>
@@ -245,11 +245,11 @@
       </ul>
     </div>
     <div class="card">
-      <div class="lbl">F · Deployment</div>
+      <div class="lbl">F · Testing &amp; Delivery</div>
       <ul class="tick">
-        <li>Setup of the client's own Linux server to run the software</li>
-        <li>Production deployment of frontend, backend and database</li>
-        <li>Final testing on the live server, then handover</li>
+        <li>Complete testing across all three panels and both onboarding flows</li>
+        <li>Delivery of the tested project for client sign-off</li>
+        <li>Server setup and deployment: <b>not included</b>, quoted separately after delivery</li>
       </ul>
     </div>
   </div>
@@ -283,9 +283,10 @@
     <h2><span class="n">05</span>Delivery Timeline</h2>
     <div class="callout" style="margin-bottom:3mm"><p style="margin:0"><b>Urgent delivery:</b> development has already started. Delivery by 11 November 2026 applies only if the advance payment is received on <b>8 November 2026</b>. If payment is later, the delivery date moves by the same number of days.</p></div>
     <div class="phase"><div class="wk">Before 8 Nov</div><div><b>Development in progress.</b> Design, panels, onboarding link module and activity logs.</div><div class="out">Already started</div></div>
-    <div class="phase"><div class="wk">8 Nov</div><div><b>Confirmation &amp; 70% advance.</b> Client shares Linux server access and domain details.</div><div class="out">Project confirmed</div></div>
-    <div class="phase"><div class="wk">9–10 Nov</div><div><b>Server setup &amp; deployment.</b> Linux server configured, software deployed, testing on the live server.</div><div class="out">Live build</div></div>
+    <div class="phase"><div class="wk">8 Nov</div><div><b>Confirmation &amp; 70% advance.</b> Final scope confirmed and remaining work scheduled.</div><div class="out">Project confirmed</div></div>
+    <div class="phase"><div class="wk">9–10 Nov</div><div><b>Completion &amp; testing.</b> Remaining work completed and tested across all panels.</div><div class="out">Test build</div></div>
     <div class="phase"><div class="wk">By 11 Nov</div><div><b>Testing sign-off &amp; delivery.</b> Client testing, final sign-off, handover.</div><div class="out">Delivered</div></div>
+    <div class="phase"><div class="wk">After delivery</div><div><b>Server setup &amp; deployment.</b> Quoted separately, based on the server chosen. Not part of this proposal.</div><div class="out">Separate quote</div></div>
   </section>
 
   <section>
@@ -293,7 +294,7 @@
     <table class="price">
       <thead><tr><th style="width:8mm">#</th><th>Description</th><th class="r">Amount (₹)</th></tr></thead>
       <tbody>
-        <tr><td>1</td><td><b>ID Card Studio School ID Platform: Upgrade &amp; Deployment</b><br /><span class="small">All discussed features as per Section 03, including Linux server setup and deployment</span></td><td class="r">10,000.00</td></tr>
+        <tr><td>1</td><td><b>ID Card Studio School ID Platform: Upgrade</b><br /><span class="small">All discussed features as per Section 03. Excludes server setup and deployment.</span></td><td class="r">10,000.00</td></tr>
         <tr><td>2</td><td><b>Portfolio Website for ID Card Studio</b> <span class="free">Complimentary</span><br /><span class="small">Standard portfolio website, as per Section 04</span></td><td class="r">0.00</td></tr>
         <tr class="sub"><td></td><td class="r">Sub-total</td><td class="r">10,000.00</td></tr>
         <tr class="sub"><td></td><td class="r">GST @ 18%</td><td class="r">1,800.00</td></tr>
@@ -328,7 +329,8 @@
   <section>
     <h2><span class="n">09</span>Not Included</h2>
     <ul class="tick cross">
-      <li>Linux server, hosting, domain and email-sending service costs (the client provides these; Scriza handles setup)</li>
+      <li><b>Server setup and deployment:</b> quoted separately once the project is delivered, as the cost depends on the server chosen</li>
+      <li>Server, hosting, domain and email-sending service costs</li>
       <li>WhatsApp or SMS sending of links (link sharing is by copying the link and by bulk email only)</li>
       <li>Native Android/iOS mobile apps</li>
       <li>Physical card printing or printer hardware integration</li>
@@ -339,8 +341,8 @@
   <section>
     <h2><span class="n">10</span>Terms</h2>
     <ul class="tick">
-      <li><b>Client inputs:</b> Server access, domain details, logos and content must be provided on time to keep the delivery date.</li>
-      <li><b>Ownership:</b> On full payment, the deployed software and website are handed over to ID Card Studio.</li>
+      <li><b>Client inputs:</b> Logos, content and timely testing feedback must be provided to keep the delivery date.</li>
+      <li><b>Ownership:</b> On full payment, the software and website are handed over to ID Card Studio.</li>
       <li><b>Data:</b> Student data is handled only for project purposes and is not shared with third parties.</li>
       <li><b>Validity:</b> This proposal and its delivery commitment are valid for payment received on 8 November 2026.</li>
     </ul>
