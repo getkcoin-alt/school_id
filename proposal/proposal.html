@@ -89,6 +89,16 @@
   .phase .wk { font-weight: 700; color: var(--coral); }
   .phase .out { text-align: right; font-size: 8.6pt; color: var(--muted); }
 
+  .flow { border: 1px solid var(--line); border-radius: 6px; padding: 3.5mm 4mm 4mm; margin-bottom: 4mm; break-inside: avoid; }
+  .flow-hd { display: flex; align-items: center; gap: 2.5mm; color: var(--navy); font-size: 10.5pt; margin-bottom: 2.5mm; }
+  .tag-ex, .tag-new { font-size: 7pt; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; padding: .6mm 2.2mm; border-radius: 3px; }
+  .tag-ex { background: #e8ecf5; color: var(--navy); }
+  .tag-new { background: #fde8eb; color: var(--coral); }
+  .steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 3mm; }
+  .step { background: var(--soft); border-radius: 5px; padding: 3mm; font-size: 8.8pt; line-height: 1.4; }
+  .step .lbl { font-size: 7.4pt; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--coral); margin-bottom: 1mm; }
+  .p2 td { padding: 2mm 3mm; }
+  .p2 section { margin-bottom: 5mm; }
   .sign { display: grid; grid-template-columns: 1fr 1fr; gap: 10mm; margin-top: 6mm; }
   .sign .box .space { height: 20mm; border-bottom: 1.5px solid var(--navy); margin-bottom: 2.5mm; }
   .small { font-size: 8.6pt; color: var(--muted); }
@@ -133,14 +143,13 @@
 </div>
 
 <!-- ============ PAGE 2: INTRO + OVERVIEW ============ -->
-<div class="page">
+<div class="page p2">
   <div class="hdr">{{SCRIZA_LOGO_SMALL}}<div>ID Card Studio · Web Development Proposal</div></div>
 
   <section>
     <p>Dear Mr. Sunil Kumar,</p>
-    <p>Thank you for choosing Scriza again. This proposal covers the upgraded <b>ID Card Studio</b> school ID platform. It keeps every feature of the ID Studio project we delivered earlier and adds a modern, user-friendly design, a user guide, a new student onboarding link module and user activity logs.</p>
+    <p>Thank you for choosing Scriza again. This proposal covers the upgraded <b>ID Card Studio</b> school ID platform. It keeps every feature of the ID Studio project we delivered earlier and adds a modern, user-friendly design, a user guide, a new student onboarding link module (alongside the existing Excel upload) and user activity logs.</p>
     <p>Because the project is urgent, <b>development has already started</b>. If payment is received <b>today, 8 November 2026</b>, the complete project will be delivered <b>by 11 November 2026</b>. The only work left is setting up your Linux server and deploying the software on it.</p>
-    <p>As a goodwill gesture, Scriza will also build a <b>standard portfolio website for ID Card Studio at no extra cost</b>.</p>
   </section>
 
   <section>
@@ -149,7 +158,7 @@
       <thead><tr><th style="width:34mm">Panel</th><th>Access</th></tr></thead>
       <tbody>
         <tr><td><b>Admin</b></td><td>Full control of schools, agents and platform settings. Can view the activity logs of every agent and school.</td></tr>
-        <tr><td><b>School</b></td><td>Manages its own student data, shares onboarding links, sends bulk emails, and reviews and approves ID card data.</td></tr>
+        <tr><td><b>School</b></td><td>Manages its own student data: uploads it by Excel or collects it through onboarding links and bulk emails, and reviews and approves ID card data.</td></tr>
         <tr><td><b>Agent: Premium</b></td><td>Works on assigned schools <b>with download access</b>. Can view its own logs and the logs of its schools.</td></tr>
         <tr><td><b>Agent: Regular</b></td><td>Works on assigned schools <b>without download access</b>. Can view its own logs and the logs of its schools.</td></tr>
       </tbody>
@@ -157,12 +166,25 @@
   </section>
 
   <section>
-    <h2><span class="n">02</span>Student Onboarding Flow</h2>
-    <div class="grid2">
-      <div class="card soft"><div class="lbl">1 · Share</div>The school copies a student's personal onboarding link and shares it, or sends the link by bulk email to selected students who have an email ID.</div>
-      <div class="card soft"><div class="lbl">2 · Submit</div>The student opens the link and fills in their own ID card details and photo.</div>
-      <div class="card soft"><div class="lbl">3 · Review</div>The school reviews the submitted data, corrects it if needed, and approves it.</div>
-      <div class="card soft"><div class="lbl">4 · Print</div>Approved data goes through the existing print and delivery process, unchanged from the earlier project.</div>
+    <h2><span class="n">02</span>Student Onboarding Flows</h2>
+    <p class="lead" style="margin-bottom:2.5mm">Two ways to onboard student data. Both end in the same school review, approval and print process.</p>
+    <div class="flow">
+      <div class="flow-hd"><span class="tag-ex">Existing</span><b>Flow 1 · Excel Upload</b></div>
+      <div class="steps">
+        <div class="step"><div class="lbl">1 · Prepare</div>Download the Excel template and fill in the student data.</div>
+        <div class="step"><div class="lbl">2 · Upload</div>Import the Excel/CSV file. Rows are validated and duplicates skipped.</div>
+        <div class="step"><div class="lbl">3 · Photos</div>Add student photos individually or in bulk.</div>
+        <div class="step"><div class="lbl">4 · Review &amp; Print</div>The school approves the data, which then goes to print.</div>
+      </div>
+    </div>
+    <div class="flow">
+      <div class="flow-hd"><span class="tag-new">New</span><b>Flow 2 · Link Sharing</b></div>
+      <div class="steps">
+        <div class="step"><div class="lbl">1 · Share</div>Copy a student's link, or bulk-email it to selected students with an email ID.</div>
+        <div class="step"><div class="lbl">2 · Submit</div>The student opens the link and fills in their own details and photo.</div>
+        <div class="step"><div class="lbl">3 · Review</div>The school checks the submission, corrects it if needed and approves it.</div>
+        <div class="step"><div class="lbl">4 · Print</div>Approved data goes through the existing print and delivery process.</div>
+      </div>
     </div>
   </section>
 
@@ -218,7 +240,7 @@
     <div class="card">
       <div class="lbl">E · Existing Features (Retained)</div>
       <ul class="tick">
-        <li>All other features of the earlier ID Studio project, as delivered</li>
+        <li>All other features of the earlier ID Studio project, as delivered, including Excel student data upload</li>
         <li>Including schools, agents, students, classes, sessions, photos, card designs, print batches and delivery tracking</li>
       </ul>
     </div>
