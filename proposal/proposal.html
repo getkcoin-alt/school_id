@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Scriza Proposal — ID Card Studio</title>
+<style>
+  @page { size: A4; margin: 0; }
+  :root {
+    --navy: #0e1a3a;
+    --navy-2: #1b2b5c;
+    --blue: #2a5bd7;
+    --coral: #f05656;
+    --ink: #1c2233;
+    --muted: #5b6478;
+    --line: #e3e7ef;
+    --soft: #f4f6fb;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: #fff; }
+  body { font-family: "Inter", "DejaVu Sans", sans-serif; color: var(--ink); font-size: 10.2pt; line-height: 1.5; }
+
+  .page { width: 210mm; height: 297mm; position: relative; overflow: hidden; page-break-after: always; padding: 22mm 18mm 24mm; }
+  .page:last-child { page-break-after: auto; }
+
+  /* Running header / footer */
+  .hdr { position: absolute; top: 9mm; left: 18mm; right: 18mm; display: flex; justify-content: space-between; align-items: center; padding-bottom: 3mm; border-bottom: 1px solid var(--line); font-size: 8pt; color: var(--muted); }
+  .ftr { position: absolute; bottom: 9mm; left: 18mm; right: 18mm; display: flex; justify-content: space-between; font-size: 7.6pt; color: var(--muted); border-top: 1px solid var(--line); padding-top: 3mm; }
+  .wordmark { font-weight: 800; letter-spacing: .14em; color: var(--navy); font-size: 11pt; }
+  .wordmark span { color: var(--blue); }
+  .brand-logo { height: 7mm; }
+
+  h1 { font-size: 30pt; line-height: 1.12; font-weight: 800; letter-spacing: -.01em; }
+  h2 { font-size: 15pt; font-weight: 750; color: var(--navy); margin: 0 0 3mm; display: flex; align-items: center; gap: 3mm; }
+  h2 .n { font-size: 9pt; font-weight: 700; color: #fff; background: var(--blue); border-radius: 4px; padding: 1px 6px; }
+  h3 { font-size: 10.8pt; font-weight: 700; color: var(--navy); margin: 0 0 1.5mm; }
+  p { margin: 0 0 2.5mm; }
+  section { margin-bottom: 7mm; }
+  .lead { color: var(--muted); }
+  ul.tick { list-style: none; }
+  ul.tick li { position: relative; padding-left: 5mm; margin-bottom: 1.2mm; }
+  ul.tick li::before { content: ""; position: absolute; left: 0; top: 2.1mm; width: 2.2mm; height: 2.2mm; border-radius: 50%; background: var(--blue); }
+  ul.cross li::before { background: #b9c0cf; }
+
+  /* Cover */
+  .cover { padding: 0; background: var(--navy); color: #fff; }
+  .cover .top { padding: 20mm 18mm 0; display: flex; justify-content: space-between; align-items: center; }
+  .cover .wordmark { color: #fff; font-size: 15pt; }
+  .cover .wordmark span { color: #8fb0ff; }
+  .cover .brand-logo { height: 11mm; }
+  .cover .tag { font-size: 8.5pt; letter-spacing: .18em; text-transform: uppercase; color: #9fb0d6; }
+  .cover .mid { padding: 38mm 18mm 0; }
+  .cover .kicker { display: inline-block; font-size: 8.5pt; letter-spacing: .2em; text-transform: uppercase; color: #fff; background: var(--blue); padding: 1.6mm 3.5mm; border-radius: 3px; margin-bottom: 8mm; }
+  .cover h1 { color: #fff; }
+  .cover .sub { margin-top: 6mm; font-size: 12.5pt; color: #c7d2ec; max-width: 150mm; }
+  .cover .client { margin: 18mm 18mm 0; display: flex; align-items: center; gap: 8mm; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12); border-radius: 6px; padding: 7mm 8mm; }
+  .cover .client img { height: 17mm; }
+  .cover .client .who { font-size: 9pt; color: #9fb0d6; text-transform: uppercase; letter-spacing: .14em; }
+  .cover .client .name { font-size: 14pt; font-weight: 700; margin-top: 1mm; }
+  .cover .client .org { color: #c7d2ec; }
+  .cover .meta { position: absolute; left: 18mm; right: 18mm; bottom: 18mm; display: grid; grid-template-columns: repeat(4, 1fr); gap: 6mm; border-top: 1px solid rgba(255,255,255,.18); padding-top: 6mm; }
+  .cover .meta .k { font-size: 7.6pt; letter-spacing: .14em; text-transform: uppercase; color: #8b9bc2; }
+  .cover .meta .v { font-size: 10pt; font-weight: 600; margin-top: 1mm; }
+  .cover .stripe { position: absolute; right: 0; top: 0; width: 6mm; height: 100%; background: linear-gradient(var(--blue), var(--coral)); }
+
+  /* Blocks */
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 5mm; }
+  .card { border: 1px solid var(--line); border-radius: 6px; padding: 4.5mm 5mm; background: #fff; break-inside: avoid; }
+  .card.soft { background: var(--soft); border-color: transparent; }
+  .card .lbl { font-size: 7.6pt; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--blue); margin-bottom: 1.5mm; }
+  .callout { border-left: 3px solid var(--coral); background: #fff5f5; padding: 3.5mm 5mm; border-radius: 0 6px 6px 0; }
+  .callout.blue { border-color: var(--blue); background: #f1f5ff; }
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4mm; margin: 4mm 0 2mm; }
+  .stat { background: var(--soft); border-radius: 6px; padding: 4mm; }
+  .stat b { display: block; font-size: 17pt; color: var(--navy); line-height: 1.1; }
+  .stat span { font-size: 8.4pt; color: var(--muted); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 9.4pt; }
+  th { text-align: left; font-size: 7.8pt; letter-spacing: .12em; text-transform: uppercase; color: #fff; background: var(--navy); padding: 2.6mm 3mm; }
+  td { padding: 2.6mm 3mm; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr:nth-child(even) td { background: #fafbfd; }
+  td.r, th.r { text-align: right; white-space: nowrap; }
+  .price td { font-size: 10pt; }
+  .price tr.sub td { background: #fff; font-weight: 600; }
+  .price tr.total td { background: var(--navy) !important; color: #fff; font-weight: 800; font-size: 12pt; border: 0; }
+  .free { display: inline-block; font-size: 7.6pt; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: #0f7a43; background: #e3f6ec; padding: .6mm 2.2mm; border-radius: 3px; }
+  .phase { display: grid; grid-template-columns: 22mm 1fr 26mm; gap: 4mm; padding: 3mm 0; border-bottom: 1px solid var(--line); }
+  .phase .wk { font-weight: 700; color: var(--blue); }
+  .phase .out { text-align: right; font-size: 8.6pt; color: var(--muted); }
+
+  .sign { display: grid; grid-template-columns: 1fr 1fr; gap: 10mm; margin-top: 6mm; }
+  .sign .box .space { height: 20mm; border-bottom: 1.5px solid var(--navy); margin-bottom: 2.5mm; }
+  .small { font-size: 8.6pt; color: var(--muted); }
+  .scope .card { padding: 3.5mm 4.5mm; }
+  .scope ul.tick li, .portfolio ul.tick li { font-size: 9.2pt; line-height: 1.38; margin-bottom: .8mm; }
+  .scope ul.tick li::before, .portfolio ul.tick li::before { top: 1.7mm; }
+</style>
+</head>
+<body>
+
+<!-- ============ COVER ============ -->
+<div class="page cover">
+  <div class="stripe"></div>
+  <div class="top">
+    {{SCRIZA_LOGO}}
+    <div class="tag">Technical &amp; Commercial Proposal</div>
+  </div>
+  <div class="mid">
+    <div class="kicker">Web Development Proposal</div>
+    <h1>ID Card Studio<br />School ID Management Platform</h1>
+    <p class="sub">End-to-end web development covering design, frontend, backend and integration, plus a complimentary portfolio website.</p>
+  </div>
+  <div class="client">
+    <img src="{{CLIENT_LOGO}}" alt="ID Studio" />
+    <div>
+      <div class="who">Prepared for</div>
+      <div class="name">Mr. Sunil Kumar</div>
+      <div class="org">ID Card Studio, powered by CTC</div>
+    </div>
+  </div>
+  <div class="meta">
+    <div><div class="k">Prepared by</div><div class="v">Karnveer Singh</div></div>
+    <div><div class="k">Company</div><div class="v">Scriza Pvt. Ltd.</div></div>
+    <div><div class="k">Date</div><div class="v">8 November 2026</div></div>
+    <div><div class="k">Reference</div><div class="v">SCZ/PRP/IDCS/2611</div></div>
+  </div>
+</div>
+
+<!-- ============ PAGE 2: INTRO + OVERVIEW ============ -->
+<div class="page">
+  <div class="hdr">{{SCRIZA_LOGO_SMALL}}<div>ID Card Studio · Web Development Proposal</div></div>
+
+  <section>
+    <p>Dear Mr. Sunil Kumar,</p>
+    <p>Thank you for the opportunity to work with <b>ID Card Studio (powered by CTC)</b>. This proposal covers the complete development of your school ID management platform. The work includes design, frontend, backend and integration, taking the platform from its current designed state to a live, working product your schools, agents and students can use every day.</p>
+    <p>As a goodwill gesture for this engagement, Scriza will also build a <b>standard portfolio website for ID Card Studio at no extra cost</b>.</p>
+  </section>
+
+  <section>
+    <h2><span class="n">01</span>Project Overview</h2>
+    <p>The platform digitises the full school ID card process, from collecting student data and photos to printing and delivering finished cards. Schools no longer need to collect paper forms and photos manually. Each student receives a personal link, fills in their own details and takes a fresh photo, and the school approves the record before it goes to print.</p>
+    <div class="stats">
+      <div class="stat"><b>5</b><span>Role panels: Super Admin, Premium Agent, Regular Agent, School Admin and Student</span></div>
+      <div class="stat"><b>17</b><span>Functional modules, from student records to print and delivery tracking</span></div>
+      <div class="stat"><b>1</b><span>Unified journey: invite → submit → review → print → deliver</span></div>
+      <div class="stat"><b>+1</b><span>Complimentary portfolio website for ID Card Studio</span></div>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="n">02</span>Current Status</h2>
+    <div class="callout blue">
+      <p style="margin:0"><b>The frontend design is already complete.</b> A responsive, branded interface covering every role panel and workflow has been designed and is available as a working preview. This proposal covers the remaining work needed to make it a production system: finishing the design, building the frontend on real data, developing the backend, integrating everything and launching it.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="n">03</span>Solution Workflow</h2>
+    <div class="grid2">
+      <div class="card soft"><div class="lbl">1 · Collect</div>The School Admin imports the student list (CSV/XLSX) and sends personal invitation links by email.</div>
+      <div class="card soft"><div class="lbl">2 · Submit</div>Students verify their link, fill in the school's configured fields and capture a live photo.</div>
+      <div class="card soft"><div class="lbl">3 · Review</div>The School Admin reviews each submission, corrects details or requests changes, then approves it.</div>
+      <div class="card soft"><div class="lbl">4 · Print &amp; Deliver</div>Approved records become print batches with card PDF proofs. Agents track progress from printing to delivery.</div>
+    </div>
+  </section>
+
+  <div class="ftr"><div>Scriza Private Limited · www.scriza.in</div><div>Confidential · Page 2</div></div>
+</div>
+
+<!-- ============ PAGE 3: SCOPE ============ -->
+<div class="page">
+  <div class="hdr">{{SCRIZA_LOGO_SMALL}}<div>ID Card Studio · Web Development Proposal</div></div>
+
+  <section style="margin-bottom:3mm">
+    <h2><span class="n">04</span>Scope of Work</h2>
+    <p class="lead">One fixed price covers all of the following:</p>
+  </section>
+
+  <div class="grid2 scope" style="margin-bottom:6mm; gap:4mm">
+    <div class="card">
+      <div class="lbl">A · UI / UX Design</div>
+      <ul class="tick">
+        <li>Final design pass on all existing screens</li>
+        <li>Responsive behaviour for desktop, tablet and mobile</li>
+        <li>ID card front/back and lanyard template layouts</li>
+        <li>Email invitation and notification templates</li>
+        <li>ID Card Studio branding applied consistently</li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="lbl">B · Frontend Development</div>
+      <ul class="tick">
+        <li>All 5 role panels connected to live data</li>
+        <li>Student, staff, class, section, session and promotion modules</li>
+        <li>Student self-submission form with camera capture</li>
+        <li>School review, correction and approval screens</li>
+        <li>Print batches, card PDF proofs and CSV exports</li>
+        <li>Form validation, empty states and user guidance</li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="lbl">C · Backend Development</div>
+      <ul class="tick">
+        <li>Secure login with role-based access control</li>
+        <li>REST APIs for every module in the frontend</li>
+        <li>Database for schools, students, staff and batches</li>
+        <li>Signed, expiring invitation links with email code check</li>
+        <li>Photo and PDF upload storage for each school</li>
+        <li>Audit trail of approvals and print status changes</li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="lbl">D · Integration &amp; Launch</div>
+      <ul class="tick">
+        <li>Frontend and backend integrated end to end</li>
+        <li>Transactional email service for invitations and codes</li>
+        <li>Bulk CSV/XLSX import with duplicate checks</li>
+        <li>Deployment to the client's server or cloud, with SSL</li>
+        <li>Functional testing across all roles before go-live</li>
+        <li>Handover walkthrough and admin training session</li>
+      </ul>
+    </div>
+  </div>
+
+  <section>
+    <h2><span class="n">05</span>Complimentary: Portfolio Website <span class="free" style="margin-left:2mm">Free</span></h2>
+    <div class="card soft portfolio">
+      <p>A clean, standard portfolio website for <b>ID Card Studio</b> to present the business to schools and partners:</p>
+      <div class="grid2" style="gap:3mm">
+        <ul class="tick">
+          <li>Up to 5 pages: Home, About, Products &amp; Services, Gallery, Contact</li>
+          <li>Mobile-responsive layout in ID Card Studio branding</li>
+          <li>Enquiry form with email delivery</li>
+        </ul>
+        <ul class="tick">
+          <li>WhatsApp/call buttons and Google Maps location</li>
+          <li>Basic on-page SEO (titles, meta tags, sitemap)</li>
+          <li>Link to the school ID platform login</li>
+        </ul>
+      </div>
+      <p class="small" style="margin:1.5mm 0 0">Content (text, photos, product samples) is supplied by the client. The site is a standard brochure website; e-commerce and a CMS are not included.</p>
+    </div>
+  </section>
+
+  <div class="ftr"><div>Scriza Private Limited · www.scriza.in</div><div>Confidential · Page 3</div></div>
+</div>
+
+<!-- ============ PAGE 4: TIMELINE + COMMERCIALS ============ -->
+<div class="page">
+  <div class="hdr">{{SCRIZA_LOGO_SMALL}}<div>ID Card Studio · Web Development Proposal</div></div>
+
+  <section>
+    <h2><span class="n">06</span>Delivery Timeline</h2>
+    <div class="phase"><div class="wk">Week 1</div><div><b>Kick-off &amp; design finalisation.</b> Requirements sign-off, design refinements, card templates.</div><div class="out">Approved designs</div></div>
+    <div class="phase"><div class="wk">Week 2–3</div><div><b>Backend &amp; frontend build.</b> Database, APIs, authentication, all modules connected to live data.</div><div class="out">Staging build</div></div>
+    <div class="phase"><div class="wk">Week 4</div><div><b>Integration &amp; testing.</b> Email, uploads, imports, PDF proofs; full testing across roles.</div><div class="out">UAT release</div></div>
+    <div class="phase"><div class="wk">Week 5</div><div><b>Go-live &amp; portfolio website.</b> Production deployment, training, portfolio site launch.</div><div class="out">Live platform</div></div>
+    <p class="small" style="margin-top:2mm">The timeline starts when the advance payment and required content/access are received. Delays in feedback or content shift the timeline by the same period.</p>
+  </section>
+
+  <section>
+    <h2><span class="n">07</span>Commercials</h2>
+    <table class="price">
+      <thead><tr><th style="width:8mm">#</th><th>Description</th><th class="r">Amount (₹)</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td><b>ID Card Studio School ID Platform: Complete Web Development</b><br /><span class="small">UI/UX design, frontend, backend, integration, testing and deployment, as per Section 04</span></td><td class="r">10,000.00</td></tr>
+        <tr><td>2</td><td><b>Portfolio Website for ID Card Studio</b> <span class="free">Complimentary</span><br /><span class="small">Standard portfolio website, as per Section 05</span></td><td class="r">0.00</td></tr>
+        <tr class="sub"><td></td><td class="r">Sub-total</td><td class="r">10,000.00</td></tr>
+        <tr class="sub"><td></td><td class="r">GST @ 18%</td><td class="r">1,800.00</td></tr>
+        <tr class="total"><td></td><td class="r">Total Payable</td><td class="r">₹ 11,800.00</td></tr>
+      </tbody>
+    </table>
+    <p class="small" style="margin-top:2mm">Amount in words: Rupees Eleven Thousand Eight Hundred Only (₹10,000 + 18% GST).</p>
+  </section>
+
+  <section>
+    <h2><span class="n">08</span>Payment Terms</h2>
+    <div class="grid2">
+      <div class="card soft"><div class="lbl">50% · On Confirmation</div>₹5,000 + GST (₹5,900) as advance to start the project.</div>
+      <div class="card soft"><div class="lbl">50% · On Go-Live</div>₹5,000 + GST (₹5,900) on production deployment, before handover of credentials.</div>
+    </div>
+  </section>
+
+  <div class="ftr"><div>Scriza Private Limited · www.scriza.in</div><div>Confidential · Page 4</div></div>
+</div>
+
+<!-- ============ PAGE 5: TERMS + ACCEPTANCE ============ -->
+<div class="page">
+  <div class="hdr">{{SCRIZA_LOGO_SMALL}}<div>ID Card Studio · Web Development Proposal</div></div>
+
+  <section>
+    <h2><span class="n">09</span>Not Included</h2>
+    <p class="lead">The following items are outside this proposal and can be quoted separately if required:</p>
+    <ul class="tick cross">
+      <li>Third-party running costs: domain, hosting/cloud server, email-sending credits, SMS gateway</li>
+      <li>WhatsApp Business API integration (planned as Phase 2)</li>
+      <li>Automated face matching, liveness detection or automatic photo extraction from PDFs</li>
+      <li>Native Android/iOS mobile apps</li>
+      <li>Physical card printing, printer hardware or printer driver integration</li>
+      <li>Annual maintenance (AMC), new features or change requests after scope sign-off</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2><span class="n">10</span>Support &amp; Terms</h2>
+    <ul class="tick">
+      <li><b>Warranty:</b> 30 days of free bug-fix support after go-live, covering defects within the agreed scope.</li>
+      <li><b>Ownership:</b> On full payment, the source code and website are handed over to ID Card Studio.</li>
+      <li><b>Client inputs:</b> Logos, content, card artwork, server/domain access and timely feedback are provided by the client.</li>
+      <li><b>Change requests:</b> Work outside Section 04/05 is estimated and billed separately after written approval.</li>
+      <li><b>Data:</b> Student data is handled only for project purposes and is not shared with third parties.</li>
+      <li><b>Validity:</b> This proposal is valid for 15 days from the date of issue.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2><span class="n">11</span>Acceptance</h2>
+    <p>By signing below, both parties agree to the scope, commercials and terms in this proposal.</p>
+    <div class="sign">
+      <div class="box">
+        <div class="space"></div>
+        <b>For Scriza Private Limited</b><br />
+        Karnveer Singh<br />
+        <span class="small">Date:</span>
+      </div>
+      <div class="box">
+        <div class="space"></div>
+        <b>For ID Card Studio (powered by CTC)</b><br />
+        Sunil Kumar<br />
+        <span class="small">Date:</span>
+      </div>
+    </div>
+  </section>
+
+  <div class="callout" style="margin-top:8mm">
+    <p style="margin:0"><b>Next step:</b> Confirm this proposal by email and release the advance. We will schedule the kick-off call within 2 working days.<br />
+    <span class="small">Karnveer Singh · karnveer@scriza.in · sales@scriza.in · www.scriza.in</span></p>
+  </div>
+
+  <div class="ftr"><div>Scriza Private Limited · www.scriza.in</div><div>Confidential · Page 5</div></div>
+</div>
+
+</body>
+</html>
