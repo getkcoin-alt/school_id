@@ -6,10 +6,10 @@
 <style>
   @page { size: A4; margin: 0; }
   :root {
-    --navy: #0e1a3a;
-    --navy-2: #1b2b5c;
-    --blue: #2a5bd7;
-    --coral: #f05656;
+    --navy: #091a45;
+    --navy-2: #1c2f66;
+    --blue: #1c2f66;
+    --coral: #e21a33;
     --ink: #1c2233;
     --muted: #5b6478;
     --line: #e3e7ef;
@@ -27,11 +27,12 @@
   .ftr { position: absolute; bottom: 9mm; left: 18mm; right: 18mm; display: flex; justify-content: space-between; font-size: 7.6pt; color: var(--muted); border-top: 1px solid var(--line); padding-top: 3mm; }
   .wordmark { font-weight: 800; letter-spacing: .14em; color: var(--navy); font-size: 11pt; }
   .wordmark span { color: var(--blue); }
-  .brand-logo { height: 7mm; }
+  .brand-logo { height: 6.5mm; }
+  .hdr .brand-logo { height: 6mm; }
 
   h1 { font-size: 30pt; line-height: 1.12; font-weight: 800; letter-spacing: -.01em; }
   h2 { font-size: 15pt; font-weight: 750; color: var(--navy); margin: 0 0 3mm; display: flex; align-items: center; gap: 3mm; }
-  h2 .n { font-size: 9pt; font-weight: 700; color: #fff; background: var(--blue); border-radius: 4px; padding: 1px 6px; }
+  h2 .n { font-size: 9pt; font-weight: 700; color: #fff; background: var(--coral); border-radius: 4px; padding: 1px 6px; }
   h3 { font-size: 10.8pt; font-weight: 700; color: var(--navy); margin: 0 0 1.5mm; }
   p { margin: 0 0 2.5mm; }
   section { margin-bottom: 7mm; }
@@ -42,33 +43,34 @@
   ul.cross li::before { background: #b9c0cf; }
 
   /* Cover */
-  .cover { padding: 0; background: var(--navy); color: #fff; }
-  .cover .top { padding: 20mm 18mm 0; display: flex; justify-content: space-between; align-items: center; }
-  .cover .wordmark { color: #fff; font-size: 15pt; }
-  .cover .wordmark span { color: #8fb0ff; }
-  .cover .brand-logo { height: 11mm; }
-  .cover .tag { font-size: 8.5pt; letter-spacing: .18em; text-transform: uppercase; color: #9fb0d6; }
-  .cover .mid { padding: 38mm 18mm 0; }
-  .cover .kicker { display: inline-block; font-size: 8.5pt; letter-spacing: .2em; text-transform: uppercase; color: #fff; background: var(--blue); padding: 1.6mm 3.5mm; border-radius: 3px; margin-bottom: 8mm; }
-  .cover h1 { color: #fff; }
-  .cover .sub { margin-top: 6mm; font-size: 12.5pt; color: #c7d2ec; max-width: 150mm; }
-  .cover .client { margin: 18mm 18mm 0; display: flex; align-items: center; gap: 8mm; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12); border-radius: 6px; padding: 7mm 8mm; }
-  .cover .client img { height: 17mm; }
-  .cover .client .who { font-size: 9pt; color: #9fb0d6; text-transform: uppercase; letter-spacing: .14em; }
-  .cover .client .name { font-size: 14pt; font-weight: 700; margin-top: 1mm; }
-  .cover .client .org { color: #c7d2ec; }
-  .cover .meta { position: absolute; left: 18mm; right: 18mm; bottom: 18mm; display: grid; grid-template-columns: repeat(4, 1fr); gap: 6mm; border-top: 1px solid rgba(255,255,255,.18); padding-top: 6mm; }
-  .cover .meta .k { font-size: 7.6pt; letter-spacing: .14em; text-transform: uppercase; color: #8b9bc2; }
-  .cover .meta .v { font-size: 10pt; font-weight: 600; margin-top: 1mm; }
-  .cover .stripe { position: absolute; right: 0; top: 0; width: 6mm; height: 100%; background: linear-gradient(var(--blue), var(--coral)); }
+  .cover { padding: 0; background: #fff; text-align: center; }
+  .cover .bar { position: absolute; left: 0; right: 0; top: 0; height: 4mm; background: var(--navy); }
+  .cover .bar::after { content: ""; position: absolute; left: 0; bottom: -1.2mm; width: 100%; height: 1.2mm; background: var(--coral); }
+  .cover .brand { padding-top: 30mm; }
+  .cover .brand .brand-logo { height: 20mm; }
+  .cover .tagline { margin-top: 3mm; font-size: 9pt; letter-spacing: .2em; text-transform: uppercase; color: var(--muted); }
+  .cover .mid { padding: 22mm 22mm 0; }
+  .cover .kicker { font-size: 10pt; font-weight: 700; letter-spacing: .24em; text-transform: uppercase; color: var(--coral); margin-bottom: 5mm; }
+  .cover h1 { color: var(--navy); font-size: 27pt; }
+  .cover .sub { margin: 5mm auto 0; font-size: 11.5pt; color: var(--muted); max-width: 150mm; }
+  .cover .parties { margin: 16mm 22mm 0; display: grid; grid-template-columns: 1fr 1fr; gap: 6mm; text-align: left; }
+  .cover .party { border: 1px solid var(--line); border-top: 3px solid var(--navy); border-radius: 6px; padding: 6mm; }
+  .cover .party.client { border-top-color: var(--coral); display: flex; gap: 5mm; align-items: center; }
+  .cover .party .tile { flex: none; width: 24mm; height: 24mm; border-radius: 6px; background: var(--navy); display: grid; place-items: center; }
+  .cover .party .tile img { width: 18mm; }
+  .cover .party .who { font-size: 7.8pt; font-weight: 700; color: var(--coral); text-transform: uppercase; letter-spacing: .16em; }
+  .cover .party .name { font-size: 13pt; font-weight: 700; color: var(--navy); margin-top: 1mm; }
+  .cover .party .org { color: var(--muted); font-size: 9.4pt; }
+  .cover .meta { position: absolute; left: 22mm; right: 22mm; bottom: 18mm; display: flex; justify-content: space-between; border-top: 1px solid var(--line); padding-top: 4mm; font-size: 8.6pt; color: var(--muted); }
+  .cover .meta b { color: var(--navy); }
 
   /* Blocks */
   .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 5mm; }
   .card { border: 1px solid var(--line); border-radius: 6px; padding: 4.5mm 5mm; background: #fff; break-inside: avoid; }
   .card.soft { background: var(--soft); border-color: transparent; }
-  .card .lbl { font-size: 7.6pt; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--blue); margin-bottom: 1.5mm; }
+  .card .lbl { font-size: 7.6pt; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--coral); margin-bottom: 1.5mm; }
   .callout { border-left: 3px solid var(--coral); background: #fff5f5; padding: 3.5mm 5mm; border-radius: 0 6px 6px 0; }
-  .callout.blue { border-color: var(--blue); background: #f1f5ff; }
+  .callout.blue { border-color: var(--navy); background: #f1f4fa; }
   .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4mm; margin: 4mm 0 2mm; }
   .stat { background: var(--soft); border-radius: 6px; padding: 4mm; }
   .stat b { display: block; font-size: 17pt; color: var(--navy); line-height: 1.1; }
@@ -84,7 +86,7 @@
   .price tr.total td { background: var(--navy) !important; color: #fff; font-weight: 800; font-size: 12pt; border: 0; }
   .free { display: inline-block; font-size: 7.6pt; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: #0f7a43; background: #e3f6ec; padding: .6mm 2.2mm; border-radius: 3px; }
   .phase { display: grid; grid-template-columns: 22mm 1fr 26mm; gap: 4mm; padding: 3mm 0; border-bottom: 1px solid var(--line); }
-  .phase .wk { font-weight: 700; color: var(--blue); }
+  .phase .wk { font-weight: 700; color: var(--coral); }
   .phase .out { text-align: right; font-size: 8.6pt; color: var(--muted); }
 
   .sign { display: grid; grid-template-columns: 1fr 1fr; gap: 10mm; margin-top: 6mm; }
@@ -99,29 +101,34 @@
 
 <!-- ============ COVER ============ -->
 <div class="page cover">
-  <div class="stripe"></div>
-  <div class="top">
+  <div class="bar"></div>
+  <div class="brand">
     {{SCRIZA_LOGO}}
-    <div class="tag">Technical &amp; Commercial Proposal</div>
   </div>
   <div class="mid">
-    <div class="kicker">Web Development Proposal</div>
-    <h1>ID Card Studio<br />School ID Platform Upgrade</h1>
+    <div class="kicker">Project Proposal</div>
+    <h1>ID CARD STUDIO<br />SCHOOL ID PLATFORM UPGRADE</h1>
     <p class="sub">Modern redesign, three role panels, student onboarding links, activity logs and Linux server deployment, plus a complimentary portfolio website.</p>
   </div>
-  <div class="client">
-    <img src="{{CLIENT_LOGO}}" alt="ID Studio" />
-    <div>
-      <div class="who">Prepared for</div>
-      <div class="name">Mr. Sunil Kumar</div>
-      <div class="org">ID Card Studio, powered by CTC</div>
+  <div class="parties">
+    <div class="party client">
+      <div class="tile"><img src="{{CLIENT_LOGO}}" alt="ID Studio" /></div>
+      <div>
+        <div class="who">Prepared for</div>
+        <div class="name">Mr. Sunil Kumar</div>
+        <div class="org">ID Card Studio<br />Powered by CTC</div>
+      </div>
+    </div>
+    <div class="party">
+      <div class="who">Prepared by</div>
+      <div class="name">Karnveer Singh</div>
+      <div class="org">Scriza Private Limited<br />www.scriza.in</div>
     </div>
   </div>
   <div class="meta">
-    <div><div class="k">Prepared by</div><div class="v">Karnveer Singh</div></div>
-    <div><div class="k">Company</div><div class="v">Scriza Pvt. Ltd.</div></div>
-    <div><div class="k">Date</div><div class="v">8 November 2026</div></div>
-    <div><div class="k">Reference</div><div class="v">SCZ/PRP/IDCS/2611</div></div>
+    <div>Date: <b>8 November 2026</b></div>
+    <div>Technical &amp; Commercial Proposal</div>
+    <div>Ref: <b>SCZ/PRP/IDCS/2611</b></div>
   </div>
 </div>
 
@@ -159,7 +166,7 @@
     </div>
   </section>
 
-  <div class="ftr"><div>Scriza Private Limited · www.scriza.in</div><div>Confidential · Page 2</div></div>
+  <div class="ftr"><div><b style="color:var(--navy)">Scriza Private Limited</b> · www.scriza.in</div><div>Confidential · Page 2</div></div>
 </div>
 
 <!-- ============ PAGE 3: SCOPE ============ -->
@@ -243,7 +250,7 @@
     </div>
   </section>
 
-  <div class="ftr"><div>Scriza Private Limited · www.scriza.in</div><div>Confidential · Page 3</div></div>
+  <div class="ftr"><div><b style="color:var(--navy)">Scriza Private Limited</b> · www.scriza.in</div><div>Confidential · Page 3</div></div>
 </div>
 
 <!-- ============ PAGE 4: TIMELINE + COMMERCIALS ============ -->
@@ -282,7 +289,7 @@
     </div>
   </section>
 
-  <div class="ftr"><div>Scriza Private Limited · www.scriza.in</div><div>Confidential · Page 4</div></div>
+  <div class="ftr"><div><b style="color:var(--navy)">Scriza Private Limited</b> · www.scriza.in</div><div>Confidential · Page 4</div></div>
 </div>
 
 <!-- ============ PAGE 5: TERMS + ACCEPTANCE ============ -->
@@ -341,7 +348,7 @@
     <span class="small">Karnveer Singh · karnveer@scriza.in · sales@scriza.in · www.scriza.in</span></p>
   </div>
 
-  <div class="ftr"><div>Scriza Private Limited · www.scriza.in</div><div>Confidential · Page 5</div></div>
+  <div class="ftr"><div><b style="color:var(--navy)">Scriza Private Limited</b> · www.scriza.in</div><div>Confidential · Page 5</div></div>
 </div>
 
 </body>
