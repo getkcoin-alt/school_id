@@ -844,8 +844,60 @@ export function PrintOrders({ ctx }) {
     [detail, setDetail] = useState(null),
     [nextStatus, setNextStatus] = useState(""),
     [tracking, setTracking] = useState(""),
-    [carrier, setCarrier] = useState("");
+    [carrier, setCarrier] = useState(""),
+    [fulfilled, setFulfilled] = useState(""),
+    [readySchools, setReadySchools] = useState(null);
+  const { live } = ctx;
   const canProduce = ["super", "premium"].includes(role);
+  const canDownload = role !== "regular" && (!live || ctx.permissions.download);
+  const printer = (b) =>
+    b.fulfilledBy || (b.owner === "ID Studio" || b.owner === "ID Card Studio" ? "ID Card Studio" : "Agent");
+  // Change sheet #10: batch creation lists only schools with cards ready to print.
+  useEffect(() => {
+    if (!create || role === "school") return;
+    if (live)
+      ctx.api
+        .get("/schools/print-queue")
+        .then((r) => setReadySchools(r.items.map((s) => s.id)))
+        .catch(() => setReadySchools(null));
+    else
+      setReadySchools(
+        availableSchools
+          .filter((sc) => data.students.some((st) => st.school === sc.id && eligible(st)))
+          .map((sc) => sc.id),
+      );
+  }, [create]);
+  const pickableSchools = readySchools
+    ? availableSchools.filter((s) => readySchools.includes(s.id) || s.id === school.id)
+    : availableSchools;
+  // Live batches carry their records on the server; load them when opened.
+  useEffect(() => {
+    if (!live || !detail || detail.snapshot) return;
+    ctx.api
+      .get(`/batches/${detail.id}`)
+      .then((r) => {
+        const map = (i) => ({
+          ...i,
+          id: i.id || i.code,
+          classNo: i.className,
+          admission: i.admissionNo,
+          father: i.fatherName,
+          mother: i.motherName,
+          photo: i.photoUrl,
+        });
+        setDetail((d) =>
+          d && d.id === r.id
+            ? {
+                ...d,
+                snapshot: r.items.filter((i) => i._kind === "STUDENT").map(map),
+                staffSnapshot: r.items.filter((i) => i._kind === "STAFF").map(map),
+                orderForms: r.orderForms,
+              }
+            : d,
+        );
+      })
+      .catch((e) => notify(e.message, "error"));
+  }, [detail?.id]);
   const students = schoolStudents.filter(eligible);
   const staff = data.staff.filter(
     (s) =>
@@ -910,6 +962,7 @@ export function PrintOrders({ ctx }) {
   const visibleBatches = batches.filter(
     (b) =>
       (!batchStatus || b.status === batchStatus) &&
+      (!fulfilled || printer(b) === fulfilled) &&
       `${b.name} ${b.id} ${data.schools.find((s) => s.id === b.school)?.name}`
         .toLowerCase()
         .includes(batchQuery.toLowerCase()),
@@ -1037,6 +1090,15 @@ export function PrintOrders({ ctx }) {
               <option key={s}>{s}</option>
             ))}
           </select>
+          <select
+            aria-label="Filter by who prints"
+            value={fulfilled}
+            onChange={(e) => setFulfilled(e.target.value)}
+          >
+            <option value="">Fulfilled by: anyone</option>
+            <option>ID Card Studio</option>
+            <option>Agent</option>
+          </select>
         </div>
         <div className="table-wrap">
           <table>
@@ -1056,7 +1118,7 @@ export function PrintOrders({ ctx }) {
                   <td>
                     <strong>{b.name}</strong>
                     <small className="block muted">
-                      {b.id} · {fmtDate(b.date)}
+                      {b.code || b.id} · {fmtDate(b.date)}
                     </small>
                   </td>
                   <td>{data.schools.find((s) => s.id === b.school)?.name}</td>
@@ -1112,6 +1174,7 @@ export function PrintOrders({ ctx }) {
         an approved student returns the record to review. Printed output in this
         preview is a sample card proof.
       </Callout>
+      <OrderForms ctx={ctx} batches={batches} />
       {create && (
         <Modal
           wide
@@ -1130,13 +1193,16 @@ export function PrintOrders({ ctx }) {
                     setStaffIds([]);
                   }}
                 >
-                  {availableSchools.map((s) => (
+                  {pickableSchools.map((s) => (
                     <option key={s.id} value={s.id}>
                       {s.name}
                     </option>
                   ))}
                 </select>
               </Field>
+            )}
+            {readySchools && !readySchools.length && role !== "school" && (
+              <Callout>No school has approved cards waiting for print.</Callout>
             )}
             <Field label="Batch name">
               <input
@@ -1260,6 +1326,24 @@ export function PrintOrders({ ctx }) {
               <span>Design: {detail.design}</span>
             </div>
             <div className="button-row">
+              {live && canDownload && (
+                <>
+                  <Button
+                    icon="download"
+                    onClick={() => ctx.download(`/batches/${detail.id}/download.zip`, `${detail.code}.zip`)}
+                  >
+                    Excel + photos (ZIP)
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    icon="fileDown"
+                    onClick={() => ctx.download(`/batches/${detail.id}/proof.pdf`, `${detail.code}-proof.pdf`)}
+                  >
+                    Proof checklist
+                  </Button>
+                </>
+              )}
+              {!live && canDownload && (
               <Button
                 variant="secondary"
                 icon="download"
@@ -1270,6 +1354,7 @@ export function PrintOrders({ ctx }) {
               >
                 Export batch CSV
               </Button>
+              )}
               <PDFProofButton
                 disabled={
                   !batchRows(detail).length && !detail.staffSnapshot?.length
@@ -1288,7 +1373,7 @@ export function PrintOrders({ ctx }) {
                 design={detail.design}
               />
             </div>
-            {!batchRows(detail).length && !detail.staffSnapshot?.length && (
+            {!live && !batchRows(detail).length && !detail.staffSnapshot?.length && (
               <Callout>
                 Historical sample batch: individual records are not attached.
                 Create a new batch to try record exports and card proofs.
@@ -1366,5 +1451,91 @@ export function PrintOrders({ ctx }) {
         </Modal>
       )}
     </>
+  );
+}
+
+/** Change sheet #6: every panel can upload a school's order form. */
+function OrderForms({ ctx, batches }) {
+  const { live, school, data, notify, update, role } = ctx;
+  const [file, setFile] = useState(null),
+    [batchId, setBatchId] = useState(""),
+    [note, setNote] = useState(""),
+    [busy, setBusy] = useState(false);
+  const forms = (live ? data.orderForms : data.orderForms || []).filter(
+    (f) => role !== "school" || (f.schoolId || f.school) === school.id,
+  );
+  const upload = async () => {
+    if (!file) return;
+    setBusy(true);
+    try {
+      if (live) {
+        await ctx.api.upload("/media/order-forms", { schoolId: school.id, batchId: batchId || undefined, note: note || undefined, file });
+        await ctx.reload();
+      } else
+        update((d) => ({
+          ...d,
+          orderForms: [
+            { id: Date.now().toString(36), school: school.id, schoolName: school.name, fileName: file.name, note, batchCode: batchId, createdAt: new Date().toISOString() },
+            ...(d.orderForms || []),
+          ],
+        }));
+      notify("Order form uploaded.");
+      setFile(null);
+      setNote("");
+      setBatchId("");
+    } catch (e) {
+      notify(e.message, "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Panel title="Order forms" subtitle={`Signed order forms for ${school.name}. PDF, image, Excel or Word.`}>
+      <div className="padded order-form-upload">
+        <label className="btn secondary upload-label">
+          <Icon name="upload" size={15} />
+          <span>{file ? file.name : "Choose file"}</span>
+          <input type="file" accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls,.doc,.docx" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+        </label>
+        <select aria-label="Link to a batch" value={batchId} onChange={(e) => setBatchId(e.target.value)}>
+          <option value="">Not linked to a batch</option>
+          {batches
+            .filter((b) => b.school === school.id)
+            .map((b) => (
+              <option key={b.id} value={b.code || b.id}>
+                {b.name}
+              </option>
+            ))}
+        </select>
+        <input placeholder="Note (optional)" value={note} onChange={(e) => setNote(e.target.value)} maxLength="500" />
+        <Button disabled={!file || busy} onClick={upload}>
+          {busy ? "Uploading…" : "Upload order form"}
+        </Button>
+      </div>
+      {forms.length > 0 && (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>FILE</th>
+                <th>SCHOOL</th>
+                <th>BATCH</th>
+                <th>UPLOADED</th>
+              </tr>
+            </thead>
+            <tbody>
+              {forms.map((f) => (
+                <tr key={f.id}>
+                  <td>{f.url ? <a href={f.url} target="_blank" rel="noreferrer">{f.fileName}</a> : f.fileName}{f.note && <small className="block muted">{f.note}</small>}</td>
+                  <td>{f.schoolName}</td>
+                  <td>{f.batchCode || "—"}</td>
+                  <td>{fmtDate(f.createdAt)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Panel>
   );
 }

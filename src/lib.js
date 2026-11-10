@@ -1,4 +1,11 @@
-import { createSeed, STORAGE_KEY } from "./data.js";
+import {
+  createSeed,
+  STORAGE_KEY,
+  FIELDS,
+  LOCKED_FIELDS,
+  FATHER_PREFIXES,
+  MOTHER_PREFIXES,
+} from "./data.js";
 export function loadData() {
   try {
     const d = JSON.parse(localStorage.getItem(STORAGE_KEY));
@@ -103,58 +110,105 @@ export function validateStudent(s, fields) {
     errors.dob = "Date of birth cannot be in the future.";
   return errors;
 }
-export function parseImport(rows, school, existing) {
+const norm = (v) => String(v ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+const sameChild = (a, b) =>
+  norm(a.name) === norm(b.name) &&
+  norm(a.father) === norm(b.father) &&
+  (a.dob || "") === (b.dob || "");
+/** Excel serial numbers and DD/MM/YYYY become ISO dates. */
+export function sheetDate(v) {
+  if (v === undefined || v === null || v === "") return "";
+  if (typeof v === "number" && v > 1000 && v < 80000)
+    return new Date(Date.UTC(1899, 11, 30) + v * 86400000).toISOString().slice(0, 10);
+  const s = String(v).trim();
+  const m = s.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})$/);
+  if (m) return `${m[3].length === 2 ? "20" + m[3] : m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
+  return /^\d{4}-\d{2}-\d{2}/.test(s) ? s.slice(0, 10) : "";
+}
+/**
+ * Reads the agreed upload sheet (SRNO, PHOTO, NAME, PREFIXF, FATHER, PREFIXM, MOTHER,
+ * DOB, CLASS, SECTION, MOBILE, ADDRESS, ADMNO, SRN) and older templates. Duplicates
+ * by admission number, or by name + father + date of birth, are skipped.
+ */
+export function parseImport(rows, school, existing, session = "2026–27") {
   let duplicates = 0,
     invalid = 0;
-  const seen = new Set(
-    existing.filter((s) => s.school === school).map((s) => String(s.admission)),
-  );
+  const pool = existing.filter((s) => s.school === school);
+  const seen = new Set(pool.map((s) => String(s.admission)).filter(Boolean));
   const students = [];
   for (const row of rows) {
     const r = Object.fromEntries(
       Object.entries(row).map(([k, v]) => [
         k.toLowerCase().replace(/[^a-z]/g, ""),
-        String(v ?? "").trim(),
+        v,
       ]),
     );
-    const name = r.name || r.studentname;
-    const admission = r.admission || r.admissionnumber || r.admissionno;
-    const email = r.email || r.emailaddress;
-    if (
-      !name ||
-      !admission ||
-      !email ||
-      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
-    ) {
+    const t = (...keys) => {
+      for (const k of keys) {
+        const v = r[k];
+        if (v !== undefined && String(v).trim() !== "") return String(v).trim();
+      }
+      return "";
+    };
+    const name = t("name", "studentname");
+    const admission = t("admno", "admission", "admissionnumber", "admissionno");
+    const email = t("email", "emailaddress");
+    const classNo = t("class", "classno");
+    if (!name || !classNo || (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) {
       invalid++;
       continue;
     }
-    if (seen.has(admission)) {
-      duplicates++;
-      continue;
-    }
-    seen.add(admission);
-    students.push({
+    const student = {
       id: uid("ST"),
       school,
       name,
       admission,
       email,
-      phone: r.phone || r.contactnumber || "",
-      classNo: r.class || r.classno || "6",
-      section: r.section || "A",
-      father: r.father || r.fathername || "",
-      mother: r.mother || r.mothername || "",
-      address: r.address || "",
+      photoNo: t("photo", "photono"),
+      fatherPrefix: t("prefixf", "fatherprefix"),
+      father: t("father", "fathername"),
+      motherPrefix: t("prefixm", "motherprefix"),
+      mother: t("mother", "mothername"),
+      dob: sheetDate(r.dob ?? r.dateofbirth),
+      phone: t("mobile", "phone", "contactnumber", "contactno").replace(/\D/g, "").slice(-10),
+      classNo,
+      section: t("section").toUpperCase(),
+      address: t("address"),
+      srn: t("srn"),
       status: "Draft",
       active: true,
       photo: "",
       photoSource: "",
-      session: "2026–27",
+      session,
       custom: {},
-    });
+    };
+    if ((admission && seen.has(admission)) || [...pool, ...students].some((s) => (s.father || s.dob) && sameChild(s, student))) {
+      duplicates++;
+      continue;
+    }
+    if (admission) seen.add(admission);
+    students.push(student);
   }
   return { students, duplicates, invalid };
+}
+/** Spreadsheet in the agreed column order, in capitals, without disabled fields. */
+export async function exportSheet(rows, fields, name = "students.xlsx") {
+  const XLSX = await import("xlsx");
+  const keys = fields.map((f) => f[0]).filter((k) => k !== "photoNo");
+  const COLUMN = { name: "NAME", fatherPrefix: "PREFIXF", father: "FATHER", motherPrefix: "PREFIXM", mother: "MOTHER", dob: "DOB", classNo: "CLASS", section: "SECTION", phone: "MOBILE", address: "ADDRESS", admission: "ADMNO", srn: "SRN", email: "EMAIL", gender: "GENDER", admissionDate: "ADMDATE", blood: "BLOOD", transport: "TRANSPORT" };
+  const dmy = (v) => (v && /^\d{4}-\d{2}-\d{2}/.test(v) ? v.slice(0, 10).split("-").reverse().join("-") : v || "");
+  const sorted = [...rows].sort((a, b) => String(a.classNo).localeCompare(String(b.classNo), "en", { numeric: true }) || String(a.section).localeCompare(String(b.section)) || a.name.localeCompare(b.name));
+  const sheet = sorted.map((s, i) => {
+    const out = { SRNO: i + 1, PHOTO: String(s.photoNo || s.admission || s.id).toUpperCase() };
+    for (const k of keys) {
+      const v = ["dob", "admissionDate"].includes(k) ? dmy(s[k]) : s[k];
+      out[COLUMN[k] || k.toUpperCase()] = k === "email" ? String(v || "").toLowerCase() : String(v ?? "").toUpperCase();
+    }
+    return out;
+  });
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sheet), "Students");
+  XLSX.writeFile(wb, name);
 }
 export async function cardPDF(students, school, design = "Classic") {
   const { jsPDF } = await import("jspdf");
@@ -272,3 +326,39 @@ function rasterPhoto(src) {
   });
 }
 export const STAGES = ["In progress", "Printed", "Delivered"];
+
+/** The school's printed fields with its own compulsory/optional choices (change sheet #11). */
+export function schoolFieldList(data, schoolId) {
+  const keys = data.fieldScope?.[schoolId] || data.enabledFields;
+  const required = data.fieldRequired?.[schoolId];
+  return FIELDS.filter((f) => keys.includes(f[0]) || LOCKED_FIELDS.includes(f[0])).map(
+    ([key, label, type, req]) => [
+      key,
+      label,
+      type,
+      LOCKED_FIELDS.includes(key) || (required ? required.includes(key) : req),
+    ],
+  );
+}
+export function requiredKeys(data, schoolId) {
+  return (
+    data.fieldRequired?.[schoolId] ||
+    FIELDS.filter((f) => f[3]).map((f) => f[0])
+  );
+}
+/** Options for select-type fields; returns null for free-text inputs. */
+export function optionsFor(type, data) {
+  return type === "class"
+    ? data.classes
+    : type === "section"
+      ? data.sections
+      : type === "gender"
+        ? ["Male", "Female", "Other"]
+        : type === "blood"
+          ? ["A+", "A−", "B+", "B−", "AB+", "AB−", "O+", "O−"]
+          : type === "fatherPrefix"
+            ? FATHER_PREFIXES
+            : type === "motherPrefix"
+              ? MOTHER_PREFIXES
+              : null;
+}

@@ -6845,3 +6845,235 @@ td small {
   padding: 0 22px 20px;
   flex-wrap: wrap;
 }
+
+/* ---- Field settings: printed + compulsory switches ---- */
+.field-switch-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.switch-caption {
+  font-size: 9px;
+  color: #8e98a4;
+}
+@media (max-width: 720px) {
+  .field-switches {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ---- Sign-in and account setup ---- */
+.auth-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 18px;
+  padding: 32px 16px;
+  background: radial-gradient(circle at 20% 0%, #fde9e6 0, transparent 45%), #f7f7f9;
+}
+.auth-card {
+  width: min(420px, 100%);
+  background: #fff;
+  border-radius: 18px;
+  padding: 32px 28px;
+  box-shadow: 0 18px 50px rgba(31, 36, 48, 0.08);
+}
+.auth-logo {
+  height: 34px;
+  margin-bottom: 22px;
+}
+.auth-card h1 {
+  font-size: 22px;
+  margin: 0 0 6px;
+}
+.auth-form {
+  display: grid;
+  gap: 14px;
+  margin-top: 20px;
+}
+.auth-form .btn {
+  justify-content: center;
+}
+.auth-foot {
+  font-size: 11px;
+  color: #8e98a4;
+}
+.password-input {
+  position: relative;
+  display: block;
+}
+.password-input input {
+  width: 100%;
+  padding-right: 40px;
+}
+.password-input .icon-btn {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+.link-button {
+  background: none;
+  border: 0;
+  color: #f05656;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 4px;
+}
+.impersonation-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 8px 16px;
+  background: #1f2430;
+  color: #fff;
+  font-size: 12px;
+}
+.impersonation-bar .btn {
+  padding: 4px 10px;
+  font-size: 11px;
+}
+.sync-indicator {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  background: #1f2430;
+  color: #fff;
+  font-size: 11px;
+  padding: 6px 12px;
+  border-radius: 20px;
+  z-index: 60;
+}
+
+/* ---- Live student link ---- */
+.portal-live {
+  max-width: 760px;
+  margin: 24px auto;
+  padding: 24px 16px 48px;
+  display: grid;
+  gap: 16px;
+}
+.portal-live.centered {
+  text-align: center;
+  justify-items: center;
+  margin-top: 12vh;
+}
+.portal-live h1 {
+  font-size: 22px;
+  margin: 0;
+}
+.portal-photo {
+  width: min(300px, 100%);
+  aspect-ratio: 4 / 5;
+  margin: 0 auto;
+  border-radius: 16px;
+  overflow: hidden;
+  background: #f1f2f5;
+  display: grid;
+  place-items: center;
+}
+.portal-photo video,
+.portal-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.portal-confirm {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 18px;
+  align-items: start;
+}
+.portal-confirm img {
+  width: 140px;
+  border-radius: 12px;
+}
+.check-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 13px;
+}
+@media (max-width: 560px) {
+  .portal-confirm {
+    grid-template-columns: 1fr;
+  }
+}
+
+.activity-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.activity-filters select,
+.date-filter input {
+  min-width: 0;
+}
+.date-filter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.account-list {
+  display: grid;
+  gap: 4px;
+  max-height: 55vh;
+  overflow: auto;
+  margin-top: 10px;
+}
+.account-list .link-row {
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+.account-list small {
+  display: block;
+  color: #8e98a4;
+  font-size: 11px;
+}
+.search-input {
+  width: 100%;
+}
+
+.order-form-upload {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+.order-form-upload input:not([type="file"]),
+.order-form-upload select {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+.download-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.section-chip {
+  display: inline-flex;
+  align-items: center;
+}
+.section-chip .icon-btn {
+  width: 22px;
+  height: 22px;
+}
+
+.auth-logo {
+  background: #1f2430;
+  padding: 8px 12px;
+  border-radius: 10px;
+  box-sizing: content-box;
+}

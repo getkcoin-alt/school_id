@@ -37,13 +37,14 @@ test("spreadsheet import maps school headings and isolates duplicate admissions 
       "Class No": "7",
       Section: "B",
     },
-    { name: "Duplicate", admission: "2026001", email: "duplicate@example.com" },
+    { name: "Duplicate", admission: "2026001", email: "duplicate@example.com", class: "6" },
     {
       name: "New Student again",
       admission: "NEW-001",
       email: "sample@example.com",
+      class: "7",
     },
-    { name: "Invalid", admission: "BAD", email: "not an email" },
+    { name: "Invalid", admission: "BAD", email: "not an email", class: "7" },
   ];
   const r = parseImport(rows, "SCH-001", d.students);
   assert.equal(r.students.length, 1);
@@ -55,6 +56,24 @@ test("spreadsheet import maps school headings and isolates duplicate admissions 
     parseImport([rows[1]], "SCH-002", d.students).students.length,
     1,
   );
+});
+test("the agreed upload sheet is read, including prefixes, photo numbers and Excel dates", () => {
+  const rows = [
+    { SRNO: 1, PHOTO: "DSC_0101", NAME: "ADITYA", PREFIXF: "MR.", FATHER: "SUNIL", PREFIXM: "MRS.", MOTHER: "POONAM", DOB: 42348, CLASS: "VII", SECTION: "a", MOBILE: 9494949494, ADDRESS: "SONIPAT", ADMNO: 9196, SRN: 2002510881 },
+    { SRNO: 2, PHOTO: "DSC_0102", NAME: "Aditya", FATHER: "Sunil", DOB: "10/12/2015", CLASS: "VII" },
+    { SRNO: 3, NAME: "No Class" },
+  ];
+  const r = parseImport(rows, "SCH-009", []);
+  assert.equal(r.students.length, 1);
+  assert.equal(r.duplicates, 1); // same name, father and date of birth
+  assert.equal(r.invalid, 1);
+  const s = r.students[0];
+  assert.equal(s.photoNo, "DSC_0101");
+  assert.equal(s.fatherPrefix, "MR.");
+  assert.equal(s.dob, "2015-12-10");
+  assert.equal(s.section, "A");
+  assert.equal(s.phone, "9494949494");
+  assert.equal(s.admission, "9196");
 });
 test("required school fields, email, phone and future birth dates are checked", () => {
   const s = createSeed().students[0];

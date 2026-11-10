@@ -1,0 +1,66 @@
+# Production-like stack: API, worker, PostgreSQL, Redis and MinIO (S3-compatible).
+# Usage: cp server/.env.example server/.env, set secrets, then `docker compose up -d --build`.
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: idstudio
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-idstudio}
+      POSTGRES_DB: idstudio
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U idstudio"], interval: 5s, retries: 10 }
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes: [redisdata:/data]
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY_ID:-idstudio}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_ACCESS_KEY:-idstudio-secret}
+    volumes: [miniodata:/data]
+    ports: ["9000:9000", "9001:9001"]
+    restart: unless-stopped
+
+  minio-init:
+    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+    depends_on: [minio]
+    entrypoint: ["sh", "-c", "until mc alias set s3 http://minio:9000 $${S3_ACCESS_KEY_ID:-idstudio} $${S3_SECRET_ACCESS_KEY:-idstudio-secret}; do sleep 2; done; mc mb -p s3/id-studio"]
+
+  api:
+    build: ./server
+    env_file: ./server/.env
+    environment: &stack
+      NODE_ENV: production
+      DATABASE_URL: postgresql://idstudio:${POSTGRES_PASSWORD:-idstudio}@db:5432/idstudio
+      REDIS_URL: redis://redis:6379
+      STORAGE_DRIVER: s3
+      S3_BUCKET: id-studio
+      S3_REGION: us-east-1
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-idstudio}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-idstudio-secret}
+    depends_on:
+      db: { condition: service_healthy }
+      redis: { condition: service_started }
+    # Stateless: scale with `docker compose up -d --scale api=3` behind a reverse proxy.
+    ports: ["4000:4000"]
+    restart: unless-stopped
+
+  worker:
+    build: ./server
+    env_file: ./server/.env
+    environment: *stack
+    command: ["node", "dist/worker.js"]
+    depends_on: [api]
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:
+  miniodata:

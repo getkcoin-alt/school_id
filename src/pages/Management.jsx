@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { FIELDS, STAFF_FIELDS, personIcon } from "../data.js";
+import React, { useEffect, useState } from "react";
+import { FIELDS, STAFF_FIELDS, LOCKED_FIELDS, personIcon } from "../data.js";
 import {
   PageTitle,
   Panel,
@@ -14,7 +14,14 @@ import {
   Callout,
   Empty,
 } from "../components.jsx";
-import { uid, fmtDate, exportCSV, download, csvText } from "../lib.js";
+import {
+  uid,
+  fmtDate,
+  exportCSV,
+  download,
+  csvText,
+  requiredKeys,
+} from "../lib.js";
 export function SchoolForm({ ctx, value, onClose }) {
   const { data, update, notify, log } = ctx;
   const [s, setS] = useState(
@@ -1032,8 +1039,23 @@ export function Classes({ ctx }) {
         </Panel>
         <Panel title="Available sections">
           <div className="sections-list">
-            {data.sections.map((s) => (
-              <Badge key={s}>{s}</Badge>
+            {data.sections.map((sec) => (
+              <span className="section-chip" key={sec}>
+                <Badge>{sec}</Badge>
+                <IconButton
+                  icon="x"
+                  label={"Delete section " + sec}
+                  onClick={() => {
+                    const n = schoolStudents.filter((st) => st.section === sec).length;
+                    if (n) {
+                      notify(`Section ${sec} has ${n} student${n === 1 ? "" : "s"}. Move them first.`, "error");
+                      return;
+                    }
+                    update((d) => ({ ...d, sections: d.sections.filter((x) => x !== sec) }));
+                    notify(`Section ${sec} deleted.`);
+                  }}
+                />
+              </span>
             ))}
             <input
               aria-label="Section name"
@@ -1062,11 +1084,26 @@ export function Classes({ ctx }) {
                 <span className="class-icon">
                   <Icon name="layers" />
                 </span>
-                <IconButton
-                  icon="edit"
-                  label={"Rename class " + c}
-                  onClick={() => setEdit({ from: c, name: c })}
-                />
+                <span className="row-actions">
+                  <IconButton
+                    icon="edit"
+                    label={"Rename class " + c}
+                    onClick={() => setEdit({ from: c, name: c })}
+                  />
+                  <IconButton
+                    icon="trash"
+                    label={"Delete class " + c}
+                    onClick={() => {
+                      if (students.length) {
+                        notify(`Class ${c} has ${students.length} students. Move or delete them first.`, "error");
+                        return;
+                      }
+                      if (!window.confirm(`Delete class ${c}?`)) return;
+                      update((d) => ({ ...d, classes: d.classes.filter((x) => x !== c) }));
+                      notify(`Class ${c} deleted.`);
+                    }}
+                  />
+                </span>
               </div>
               <h2>Class {c}</h2>
               <p>{data.sections.join(" · ")} sections</p>
@@ -1522,10 +1559,11 @@ export function Settings({ ctx, onReset }) {
     fieldTarget === "Student"
       ? data.fieldScope[school.id] || data.enabledFields
       : data.staffFieldScope?.[school.id] || STAFF_FIELDS.map((f) => f[0]);
-  const tabs =
+  const tabs = (
     role === "school"
       ? ["Profile", "School details", "ID card fields", "Preview settings"]
-      : ["Profile", "Preview settings"];
+      : ["Profile", "Preview settings"]
+  ).filter((t) => !(ctx.live && t === "Preview settings"));
   return (
     <>
       <PageTitle
@@ -1642,37 +1680,83 @@ export function Settings({ ctx, onReset }) {
           </div>
           <div className="field-switches">
             {(fieldTarget === "Student" ? FIELDS : STAFF_FIELDS).map(
-              ([key, label, type, required]) => (
-                <label key={key}>
-                  <span>
-                    <strong>{label}</strong>
-                    <small>
-                      {required ? "Required field" : "Optional field"}
-                    </small>
-                  </span>
-                  <input
-                    type="checkbox"
-                    role="switch"
-                    disabled={required}
-                    checked={keys.includes(key)}
-                    onChange={() =>
-                      update((d) => ({
-                        ...d,
-                        [fieldTarget === "Student"
-                          ? "fieldScope"
-                          : "staffFieldScope"]: {
-                          ...(fieldTarget === "Student"
-                            ? d.fieldScope
-                            : d.staffFieldScope),
-                          [school.id]: keys.includes(key)
-                            ? keys.filter((k) => k !== key)
-                            : [...keys, key],
-                        },
-                      }))
-                    }
-                  />
-                </label>
-              ),
+              ([key, label, type, required]) => {
+                const locked =
+                  fieldTarget === "Student"
+                    ? LOCKED_FIELDS.includes(key)
+                    : required;
+                const printed = locked || keys.includes(key);
+                const compulsory =
+                  locked ||
+                  (fieldTarget === "Student" &&
+                    printed &&
+                    requiredKeys(data, school.id).includes(key));
+                return (
+                  <label key={key} className="field-switch-row">
+                    <span>
+                      <strong>{label}</strong>
+                      <small>
+                        {!printed
+                          ? "Not printed or collected"
+                          : compulsory
+                            ? "Compulsory"
+                            : "Optional"}
+                      </small>
+                    </span>
+                    <span className="field-switch-controls">
+                      <span className="switch-caption">On card</span>
+                      <input
+                        type="checkbox"
+                        role="switch"
+                        aria-label={`Print ${label} on the card`}
+                        disabled={locked}
+                        checked={printed}
+                        onChange={() =>
+                          update((d) => ({
+                            ...d,
+                            [fieldTarget === "Student"
+                              ? "fieldScope"
+                              : "staffFieldScope"]: {
+                              ...(fieldTarget === "Student"
+                                ? d.fieldScope
+                                : d.staffFieldScope),
+                              [school.id]: keys.includes(key)
+                                ? keys.filter((k) => k !== key)
+                                : [...keys, key],
+                            },
+                          }))
+                        }
+                      />
+                      {fieldTarget === "Student" && (
+                        <>
+                          <span className="switch-caption">Compulsory</span>
+                          <input
+                            type="checkbox"
+                            role="switch"
+                            aria-label={`Make ${label} compulsory`}
+                            disabled={locked || !printed}
+                            checked={compulsory}
+                            onChange={() =>
+                              update((d) => {
+                                const req = requiredKeys(d, school.id);
+                                return {
+                                  ...d,
+                                  fieldRequired: {
+                                    ...d.fieldRequired,
+                                    [school.id]: req.includes(key)
+                                      ? req.filter((k) => k !== key)
+                                      : [...req, key],
+                                  },
+                                };
+                              })
+                            }
+                          />
+                        </>
+                      )}
+                    </span>
+                  </label>
+                );
+              },
             )}
           </div>
           <div className="padded">
@@ -1750,7 +1834,8 @@ export function Settings({ ctx, onReset }) {
           </div>
           <div className="table-note">
             <Icon name="checkCircle" size={15} />
-            Field preferences save automatically in this browser.
+            Students can leave optional fields blank; compulsory fields must be
+            filled before a card can be approved.
           </div>
         </Panel>
       )}
@@ -1787,7 +1872,8 @@ export function Settings({ ctx, onReset }) {
           onClose={() => setEditSchool(false)}
         />
       )}
-      {password && (
+      {password && ctx.live && <ChangePassword ctx={ctx} onClose={() => setPassword(false)} />}
+      {password && !ctx.live && (
         <Modal
           title="Reset password"
           subtitle="Account security is a backend integration step."
@@ -1813,6 +1899,46 @@ export function Settings({ ctx, onReset }) {
         </Modal>
       )}
     </>
+  );
+}
+function ChangePassword({ ctx, onClose }) {
+  const [current, setCurrent] = useState(""),
+    [next, setNext] = useState(""),
+    [error, setError] = useState(""),
+    [busy, setBusy] = useState(false);
+  const save = async () => {
+    if (next.length < 8 || !/[a-z]/i.test(next) || !/\d/.test(next))
+      return setError("Use at least 8 characters with a letter and a number.");
+    setBusy(true);
+    try {
+      await ctx.api.post("/auth/password/change", { currentPassword: current, newPassword: next });
+      ctx.notify("Password changed. Other devices have been signed out.");
+      onClose();
+    } catch (e) {
+      setError(e.message);
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal title="Change password" onClose={onClose}>
+      <div className="modal-body form-grid">
+        {error && <Callout tone="coral">{error}</Callout>}
+        <Field label="Current password" required>
+          <input type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} />
+        </Field>
+        <Field label="New password" required hint="At least 8 characters with a letter and a number.">
+          <input type="password" autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} />
+        </Field>
+      </div>
+      <div className="modal-actions">
+        <Button variant="secondary" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button disabled={busy || !current || !next} onClick={save}>
+          Change password
+        </Button>
+      </div>
+    </Modal>
   );
 }
 export function Guide({ ctx }) {
@@ -1959,27 +2085,113 @@ export function Guide({ ctx }) {
   );
 }
 export function Activity({ ctx }) {
+  const { data, live, role } = ctx;
+  const [filters, setFilters] = useState({ userId: "", schoolId: "", from: "", to: "" });
+  const [rows, setRows] = useState(null),
+    [cursor, setCursor] = useState(null),
+    [users, setUsers] = useState([]),
+    [error, setError] = useState("");
+  const query = (c) =>
+    new URLSearchParams(
+      Object.entries({ ...filters, size: 50, cursor: c || "" }).filter(([, v]) => v),
+    ).toString();
+  const load = async (more = false) => {
+    setError("");
+    try {
+      const r = await ctx.api.get(`/activity?${query(more ? cursor : "")}`);
+      setRows((prev) => (more ? [...(prev || []), ...r.items] : r.items));
+      setCursor(r.nextCursor);
+    } catch (e) {
+      setError(e.message);
+    }
+  };
+  useEffect(() => {
+    if (live) load();
+  }, [live, filters]);
+  useEffect(() => {
+    if (live && role !== "regular" && role !== "premium")
+      ctx.api.get("/users").then((r) => setUsers(r.items)).catch(() => {});
+  }, [live]);
+  const list = live
+    ? (rows || []).map((l) => ({
+        id: l.id,
+        text: l.summary,
+        who: l.impersonatedBy ? `${l.actorName} · opened by ${l.impersonatedBy}` : l.actorName,
+        school: data.schools.find((s) => s.id === l.schoolId)?.name,
+        time: l.createdAt,
+        type: l.action.startsWith("batch") ? "print" : l.action.includes("invit") ? "email" : "check",
+      }))
+    : data.audit;
   return (
     <>
       <PageTitle
         eyebrow="A CLEAR TRAIL"
         title="Every step, accounted for."
-        description="A browser-local record of changes made while exploring the preview."
+        description={
+          live
+            ? role === "super"
+              ? "Every action by schools, agents and administrators."
+              : role === "school"
+                ? "Actions on your school's records."
+                : "Your own actions and your schools' activity."
+            : "A browser-local record of changes made while exploring the preview."
+        }
       />
+      {live && (
+        <div className="filters activity-filters">
+          {users.length > 0 && (
+            <select aria-label="Filter by user" value={filters.userId} onChange={(e) => setFilters({ ...filters, userId: e.target.value })}>
+              <option value="">All users</option>
+              {users.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.name} · {u.email}
+                </option>
+              ))}
+            </select>
+          )}
+          {role !== "school" && (
+            <select aria-label="Filter by school" value={filters.schoolId} onChange={(e) => setFilters({ ...filters, schoolId: e.target.value })}>
+              <option value="">All schools</option>
+              {data.schools.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          )}
+          <label className="date-filter">
+            From <input type="date" value={filters.from} onChange={(e) => setFilters({ ...filters, from: e.target.value })} />
+          </label>
+          <label className="date-filter">
+            To <input type="date" value={filters.to} onChange={(e) => setFilters({ ...filters, to: e.target.value })} />
+          </label>
+        </div>
+      )}
       <Panel title="Workspace activity">
+        {error && <Callout tone="coral">{error}</Callout>}
         <div className="full-activity">
-          {ctx.data.audit.map((a) => (
+          {list.map((a) => (
             <div key={a.id}>
               <span className="activity-icon coral">
                 <Icon name={a.type} />
               </span>
               <div>
                 <strong>{a.text}</strong>
-                <small>{new Date(a.time).toLocaleString("en-IN")}</small>
+                <small>
+                  {[a.who, a.school, new Date(a.time).toLocaleString("en-IN")].filter(Boolean).join(" · ")}
+                </small>
               </div>
             </div>
           ))}
         </div>
+        {live && rows && !rows.length && <Empty title="No activity found" text="Try a wider date range or clear the filters." />}
+        {live && cursor && (
+          <div className="panel-footer">
+            <Button variant="secondary" onClick={() => load(true)}>
+              Load more
+            </Button>
+          </div>
+        )}
       </Panel>
     </>
   );

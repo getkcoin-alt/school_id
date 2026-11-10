@@ -31,22 +31,33 @@ export const ROLES = [
     icon: "graduation",
   },
 ];
+// Order follows the agreed spreadsheet: Photo No., Name, Prefix (Father), Father,
+// Prefix (Mother), Mother, Date of birth, Class, Section, Contact, Address, Admission No., SRN.
+// [key, label, input type, required by default, printed by default]
 export const FIELDS = [
+  ["photoNo", "Photo No.", "text", false],
   ["name", "Full name", "text", true],
-  ["admission", "Admission number", "text", true],
-  ["classNo", "Class", "class", true],
-  ["section", "Section", "section", true],
-  ["gender", "Gender", "gender", false],
-  ["dob", "Date of birth", "date", false],
+  ["fatherPrefix", "Prefix (Father)", "fatherPrefix", false],
   ["father", "Father’s name", "text", true],
-  ["mother", "Mother’s name", "text", true],
-  ["email", "Email address", "email", true],
-  ["phone", "Contact number", "tel", true],
-  ["address", "Residential address", "text", true],
-  ["admissionDate", "Admission date", "date", false],
-  ["blood", "Blood group", "blood", false],
-  ["transport", "Transport route", "text", false],
+  ["motherPrefix", "Prefix (Mother)", "motherPrefix", false],
+  ["mother", "Mother’s name", "text", false],
+  ["dob", "Date of birth", "date", false],
+  ["classNo", "Class", "class", true],
+  ["section", "Section", "section", false],
+  ["phone", "Contact number", "tel", false],
+  ["address", "Residential address", "text", false],
+  ["admission", "Admission number", "text", false],
+  ["srn", "SRN", "text", false],
+  ["email", "Email address", "email", false],
+  ["gender", "Gender", "gender", false, false],
+  ["admissionDate", "Admission date", "date", false, false],
+  ["blood", "Blood group", "blood", false, false],
+  ["transport", "Transport route", "text", false, false],
 ];
+// Always printed and always compulsory.
+export const LOCKED_FIELDS = ["name", "classNo"];
+export const FATHER_PREFIXES = ["Mr.", "Sh.", "Dr.", "Md.", "Late Sh."];
+export const MOTHER_PREFIXES = ["Mrs.", "Smt.", "Dr.", "Ms.", "Late Smt."];
 export const STAFF_FIELDS = [
   ["name", "Full name", "text", true],
   ["email", "Email address", "email", true],
@@ -349,7 +360,8 @@ export function createSeed() {
       },
     ],
     design: "Classic",
-    enabledFields: FIELDS.map((x) => x[0]),
+    enabledFields: FIELDS.filter((x) => x[4] !== false).map((x) => x[0]),
+    fieldRequired: {},
     customFields: [],
     fieldScope: {},
     notifications: [

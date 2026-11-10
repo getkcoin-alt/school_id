@@ -1,0 +1,35 @@
+name: CI
+on:
+  push:
+  pull_request:
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+
+  server:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: server } }
+    services:
+      postgres:
+        image: postgres:16
+        env: { POSTGRES_USER: idstudio, POSTGRES_PASSWORD: idstudio, POSTGRES_DB: idstudio_test }
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready -U idstudio" --health-interval 5s --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql://idstudio:idstudio@localhost:5432/idstudio_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: server/package-lock.json }
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npm run typecheck
+      - run: npm test

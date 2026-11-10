@@ -24,6 +24,9 @@ import {
   validateStudent,
   eligible,
   cardPDF,
+  schoolFieldList,
+  optionsFor,
+  exportSheet,
 } from "../lib.js";
 export function StudentEditor({ ctx, student, onClose, onSaved }) {
   const { data, school, update, notify, log } = ctx;
@@ -55,8 +58,7 @@ export function StudentEditor({ ctx, student, onClose, onSaved }) {
         },
   );
   const [errors, setErrors] = useState({});
-  const keys = data.fieldScope[school.id] || data.enabledFields;
-  const fields = FIELDS.filter((f) => keys.includes(f[0]));
+  const fields = schoolFieldList(data, school.id);
   const change = (key, val) => {
     setDraft((d) => ({ ...d, [key]: val }));
     setErrors((e) => ({ ...e, [key]: null }));
@@ -200,20 +202,13 @@ export function StudentEditor({ ctx, student, onClose, onSaved }) {
               error={errors[key]}
               className={key === "address" ? "span-two" : ""}
             >
-              {["class", "section", "gender", "blood"].includes(type) ? (
+              {optionsFor(type, data) ? (
                 <select
                   value={draft[key] || ""}
                   onChange={(e) => change(key, e.target.value)}
                 >
                   <option value="">Select {label.toLowerCase()}</option>
-                  {(type === "class"
-                    ? data.classes
-                    : type === "section"
-                      ? data.sections
-                      : type === "gender"
-                        ? ["Male", "Female", "Other", "Prefer not to say"]
-                        : ["A+", "A−", "B+", "B−", "AB+", "AB−", "O+", "O−"]
-                  ).map((o) => (
+                  {optionsFor(type, data).map((o) => (
                     <option key={o}>{o}</option>
                   ))}
                 </select>
@@ -271,12 +266,80 @@ export function ImportStudents({ ctx, onClose }) {
   const [file, setFile] = useState(null),
     [result, setResult] = useState(null),
     [busy, setBusy] = useState(false);
-  const { notify, school, data, update, log } = ctx;
+  const { notify, school, data, update, log, live } = ctx;
+  const [report, setReport] = useState(null);
   const sample = () =>
-    download(
-      "student-import-template.csv",
-      'name,admission,class,section,email,phone,father,mother,address\nSample Student,NEW-001,6,A,student@example.com,9876500000,Parent Name,Parent Name,"Udaipur, Rajasthan"',
-      "text/csv",
+    live
+      ? ctx.download(`/students/template.xlsx?schoolId=${school.id}`, "student-upload-template.xlsx")
+      : download(
+          "student-upload-template.csv",
+          "SRNO,PHOTO,NAME,PREFIXF,FATHER,PREFIXM,MOTHER,DOB,CLASS,SECTION,MOBILE,ADDRESS,ADMNO,SRN,EMAIL\n1,DSC_0101,ADITYA,MR.,SUNIL,MRS.,POONAM,10-12-2015,VII,A,9494949494,SONIPAT,9196,2002510881,",
+          "text/csv",
+        );
+  // Live: the browser reads any Excel format (including .xlsb) and the server
+  // validates every row, skips duplicates and links photos by Photo No.
+  const importLive = async () => {
+    setBusy(true);
+    try {
+      const XLSX = await import("xlsx");
+      const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
+      const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { raw: true, defval: "" });
+      if (rows.length > 10000) throw Error("Import up to 10,000 rows at a time.");
+      const r = await ctx.api.post("/students/import", { rows, schoolId: school.id, session: ctx.session });
+      setReport(r);
+      await ctx.reload();
+      notify(`${r.created} students imported. ${r.skipped.length} duplicates skipped.`);
+    } catch (e) {
+      notify(e.message || "This file could not be read.", "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (live)
+    return (
+      <Modal title="Import your student list" subtitle={`Into ${school.name} · ${ctx.session}`} onClose={onClose}>
+        <div className="modal-body">
+          <Callout>
+            Use the agreed sheet: SRNO, PHOTO, NAME, PREFIXF, FATHER, PREFIXM, MOTHER, DOB, CLASS, SECTION, MOBILE,
+            ADDRESS, ADMNO, SRN. Only NAME and CLASS are needed; duplicates (same admission number, or same name,
+            father and date of birth) are skipped. Photos already uploaded with the same Photo No. are linked
+            automatically.
+          </Callout>
+          <Button variant="text" icon="download" onClick={sample}>
+            Download the template
+          </Button>
+          <label className="dropzone">
+            <Icon name="fileUp" size={30} />
+            <strong>{file ? file.name : "Choose your spreadsheet"}</strong>
+            <span>XLSX, XLSB, XLS or CSV</span>
+            <input type="file" accept=".csv,.xlsx,.xlsb,.xls" onChange={(e) => (setFile(e.target.files?.[0]), setReport(null))} />
+          </label>
+          {report && (
+            <div className="import-summary">
+              <Badge tone="green">{report.created} imported</Badge>
+              <Badge>{report.withPhoto} with photo</Badge>
+              <Badge>{report.skipped.length} duplicates skipped</Badge>
+              <Badge tone="red">{report.invalid.length} rows need fixing</Badge>
+              {[...report.invalid, ...report.skipped].slice(0, 8).map((x) => (
+                <p key={x.row + x.reason}>
+                  Row {x.row}
+                  {x.name ? ` · ${x.name}` : ""}: {x.reason}
+                </p>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="modal-actions">
+          <Button variant="secondary" onClick={onClose}>
+            {report ? "Done" : "Cancel"}
+          </Button>
+          {!report && (
+            <Button disabled={!file || busy} icon={busy ? "loader" : "upload"} onClick={importLive}>
+              {busy ? "Importing…" : "Import"}
+            </Button>
+          )}
+        </div>
+      </Modal>
     );
   const inspect = async () => {
     if (!file) return;
@@ -288,7 +351,7 @@ export function ImportStudents({ ctx, onClose }) {
       const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
       const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
       if (rows.length > 5000) throw Error("Import up to 5,000 rows at a time.");
-      setResult(parseImport(rows, school.id, data.students));
+      setResult(parseImport(rows, school.id, data.students, ctx.session));
     } catch (e) {
       notify(
         e.message || "This file could not be read. Use the provided template.",
@@ -306,12 +369,12 @@ export function ImportStudents({ ctx, onClose }) {
     >
       <div className="modal-body">
         <Callout>
-          Required columns: name, admission, email. Optional: class, section,
-          phone, father, mother, address. Existing admission numbers are
-          skipped.
+          Use the agreed sheet: SRNO, PHOTO, NAME, PREFIXF, FATHER, PREFIXM,
+          MOTHER, DOB, CLASS, SECTION, MOBILE, ADDRESS, ADMNO, SRN. NAME and
+          CLASS are required. Duplicates are skipped.
         </Callout>
         <Button variant="text" icon="download" onClick={sample}>
-          Download sample CSV
+          Download the template
         </Button>
         <label className="dropzone">
           <Icon name="fileUp" size={30} />
@@ -357,11 +420,7 @@ export function ImportStudents({ ctx, onClose }) {
           <Button
             disabled={!result.students.length}
             onClick={() => {
-              const fresh = parseImport(
-                result.students.map((s) => ({ ...s, class: s.classNo })),
-                school.id,
-                data.students,
-              );
+              const fresh = { students: result.students };
               update((d) =>
                 log(
                   { ...d, students: [...d.students, ...fresh.students] },
@@ -380,6 +439,37 @@ export function ImportStudents({ ctx, onClose }) {
         )}
       </div>
     </Modal>
+  );
+}
+function Downloads({ ctx, rows, query }) {
+  const { live, school, data, role } = ctx;
+  if (role === "regular" || (live && !ctx.permissions.download)) return null;
+  const q = new URLSearchParams({ schoolId: school.id, session: ctx.session, ...query }).toString();
+  const fields = schoolFieldList(data, school.id);
+  return (
+    <span className="download-group">
+      <Button
+        variant="text"
+        icon="download"
+        onClick={() =>
+          live
+            ? ctx.download(`/students/export.xlsx?${q}`, "students.xlsx")
+            : exportSheet(rows, fields, `${school.short}-students.xlsx`)
+        }
+      >
+        Excel
+      </Button>
+      {live && (
+        <>
+          <Button variant="text" icon="download" onClick={() => ctx.download(`/students/export.zip?${q}`, "students.zip")}>
+            Excel + photos
+          </Button>
+          <Button variant="text" icon="fileDown" onClick={() => ctx.download(`/students/checklist.pdf?${q}`, "checklist.pdf")}>
+            Checklist PDF
+          </Button>
+        </>
+      )}
+    </span>
   );
 }
 export default function Students({ ctx }) {
@@ -469,13 +559,13 @@ export default function Students({ ctx }) {
               </button>
             ))}
           </div>
-          <Button
-            variant="text"
-            icon="download"
-            onClick={() => exportCSV(filtered)}
-          >
-            Export CSV
-          </Button>
+          <Downloads
+            ctx={ctx}
+            rows={filtered}
+            query={Object.fromEntries(
+              Object.entries({ className: classNo, section }).filter(([, v]) => v),
+            )}
+          />
         </div>
         <div className="table-toolbar">
           <SearchBox
@@ -528,15 +618,59 @@ export default function Students({ ctx }) {
         {selected.length > 0 && (
           <div className="selection-bar">
             <span>{selected.length} selected</span>
-            <Button
-              variant="text"
-              icon="download"
-              onClick={() =>
-                exportCSV(schoolStudents.filter((s) => selected.includes(s.id)))
-              }
-            >
-              Export selected
-            </Button>
+            {["school", "super"].includes(ctx.role) && (
+              <Button
+                variant="text"
+                icon="check"
+                onClick={() => {
+                  const fields = schoolFieldList(data, school.id);
+                  const ready = schoolStudents.filter(
+                    (s) =>
+                      selected.includes(s.id) &&
+                      !["Approved", "Submitted for print"].includes(s.status) &&
+                      (ctx.live || (s.photo && !Object.keys(validateStudent(s, fields)).length)),
+                  );
+                  if (!ready.length) {
+                    notify("Selected students need all compulsory fields and a photo before approval.", "error");
+                    return;
+                  }
+                  update((d) =>
+                    log(
+                      {
+                        ...d,
+                        students: d.students.map((s) =>
+                          ready.some((r) => r.id === s.id) ? { ...s, status: "Approved", note: "" } : s,
+                        ),
+                      },
+                      `Approved ${ready.length} ID cards`,
+                    ),
+                  );
+                  notify(
+                    ctx.live
+                      ? "Approving… records missing compulsory fields or a photo will be listed."
+                      : `${ready.length} approved without an invitation.`,
+                  );
+                  setSelected([]);
+                }}
+              >
+                Approve selected
+              </Button>
+            )}
+            {ctx.role !== "regular" && (
+              <Button
+                variant="text"
+                icon="download"
+                onClick={() =>
+                  exportSheet(
+                    schoolStudents.filter((s) => selected.includes(s.id)),
+                    schoolFieldList(data, school.id),
+                    `${school.short}-selected.xlsx`,
+                  )
+                }
+              >
+                Export selected
+              </Button>
+            )}
             <Button variant="text" icon="x" onClick={() => setSelected([])}>
               Clear selection
             </Button>

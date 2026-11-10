@@ -1,5 +1,10 @@
 # ID Studio — school identity workspace
 
+> **Production backend:** see [`server/`](server/README.md). Build the frontend with
+> `VITE_API_URL` pointing at the API to get real sign-in, role-based access, email onboarding,
+> server storage and activity logs. Without it, the app runs as the self-contained preview
+> described below.
+
 A redesigned, responsive **frontend prototype** with fictional data. The UI follows the existing ID Studio logo and its coral `#F05656` accent. It is independent of the original Angular and Android clients and does not call the live backend.
 
 ## Run locally

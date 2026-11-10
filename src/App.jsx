@@ -25,7 +25,12 @@ import {
 } from "./pages/Management.jsx";
 import { PrintOrders, Designs, PhotoUploads } from "./pages/Production.jsx";
 import StudentPortal from "./pages/StudentPortal.jsx";
+import PortalLive from "./pages/PortalLive.jsx";
+import { Login, Onboard } from "./pages/Auth.jsx";
 import { clearFiles } from "./files.js";
+import { api, apiMode, auth, downloadFile, onAuthChange } from "./api/client.js";
+import { loadWorkspace, pushChanges, onApprovalReport } from "./api/sync.js";
+import { ROLE_FROM_API } from "./api/mappers.js";
 const pageNames = {
   overview: "Overview",
   students: "Students",
@@ -65,6 +70,7 @@ const menuItems = {
       ["printing", "print"],
       ["photos", "image"],
     ],
+    ["MANAGEMENT", ["activity", "clock"]],
   ],
   super: [
     [
@@ -101,19 +107,89 @@ const menuItems = {
     ],
   ],
 };
-export default function App() {
+/**
+ * With VITE_API_URL set the app runs against the production API: people sign in,
+ * see only what their role allows and every change is saved on the server.
+ * Without it, the original self-contained preview (Explore Panels) still works.
+ */
+export default function Root() {
+  const params = new URLSearchParams(window.location.search);
+  const [state, setState] = useState(apiMode ? "loading" : "demo");
+  const [initialData, setInitialData] = useState(null);
+  const [onboard, setOnboard] = useState(params.get("onboard"));
+  const invite = params.get("invite");
+  const start = async () => {
+    try {
+      setInitialData(await loadWorkspace(params.get("school")));
+      setState("ready");
+    } catch {
+      setState("login");
+    }
+  };
+  useEffect(() => {
+    if (!apiMode || invite || onboard) return;
+    auth.restore().then((ok) => (ok ? start() : setState("login")));
+    return onAuthChange(() => {
+      if (!auth.isSignedIn()) setState("login");
+      else start();
+    });
+  }, [onboard]);
+  if (!apiMode) return <App />;
+  if (invite)
+    return (
+      <div className="student-shell">
+        <header className="student-top">
+          <span className="brand student-brand">
+            <img src="/logo.svg" alt="ID Card Studio" />
+          </span>
+        </header>
+        <PortalLive invite={invite} />
+      </div>
+    );
+  if (onboard)
+    return (
+      <Onboard
+        token={onboard}
+        onDone={() => {
+          window.history.replaceState({}, "", "/");
+          setOnboard(null);
+        }}
+      />
+    );
+  if (state === "login") return <Login />;
+  if (state !== "ready") return <div className="auth-shell"><p className="muted">Loading your workspace…</p></div>;
+  return <App key={initialData.me.id + (auth.impersonating()?.id || "")} live initialData={initialData} />;
+}
+
+function App({ live = false, initialData = null }) {
   const initial = new URLSearchParams(window.location.search);
-  const [data, setData] = useState(loadData),
+  const [data, setData] = useState(() => initialData || loadData()),
     [role, setRole] = useState(
-      ROLES.some((r) => r.id === initial.get("panel"))
-        ? initial.get("panel")
-        : "school",
+      live
+        ? ROLE_FROM_API(initialData.me)
+        : ROLES.some((r) => r.id === initial.get("panel"))
+          ? initial.get("panel")
+          : "school",
     );
   const [page, setPage] = useState(
     pageNames[initial.get("page")] ? initial.get("page") : "overview",
   );
-  const [schoolId, setSchoolId] = useState(initial.get("school") || "SCH-001");
-  const [session, setSession] = useState("2026–27");
+  const [schoolId, setSchoolId] = useState(
+    live
+      ? initialData.schools.find((s) => s.id === initial.get("school"))?.id ||
+          initialData.me.schoolId ||
+          initialData.schools[0]?.id ||
+          ""
+      : initial.get("school") || "SCH-001",
+  );
+  const [session, setSession] = useState(
+    live ? initialData.currentSession : "2026–27",
+  );
+  const [syncing, setSyncing] = useState(0);
+  const dataRef = useRef(data);
+  const queue = useRef(Promise.resolve());
+  const viewRef = useRef({ schoolId, session });
+  viewRef.current = { schoolId, session };
   const [toast, setToast] = useState(null),
     [openRoles, setOpenRoles] = useState(false),
     [notifications, setNotifications] = useState(false),
@@ -127,11 +203,28 @@ export default function App() {
     clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToast(null), 5000);
   };
-  const update = (fn) =>
-    setData((prev) => {
-      const next = typeof fn === "function" ? fn(prev) : { ...prev, ...fn };
-      return next;
-    });
+  const replaceData = (next) => {
+    dataRef.current = next;
+    setData(next);
+  };
+  const reload = async () => {
+    const { schoolId: sid, session: sess } = viewRef.current;
+    replaceData(await loadWorkspace(sid, sess));
+  };
+  // In live mode every change is applied optimistically, then saved through the
+  // API in order and the workspace reloaded from the server.
+  const update = (fn) => {
+    const prev = dataRef.current;
+    const next = typeof fn === "function" ? fn(prev) : { ...prev, ...fn };
+    replaceData(next);
+    if (!live || next === prev) return;
+    setSyncing((n) => n + 1);
+    queue.current = queue.current
+      .then(() => pushChanges(prev, next, viewRef.current.schoolId))
+      .catch((e) => notify(e.message || "Could not save. Please try again.", "error"))
+      .then(() => reload().catch(() => {}))
+      .finally(() => setSyncing((n) => n - 1));
+  };
   const log = (draft, text, type = "check") => ({
     ...draft,
     audit: [
@@ -140,6 +233,29 @@ export default function App() {
     ],
   });
   useEffect(() => {
+    if (!live) return;
+    onApprovalReport((r) =>
+      notify(
+        `${r.approved} approved. ${r.failed.length} need attention: ${r.failed
+          .slice(0, 3)
+          .map((f) => `${f.name} (${f.reason})`)
+          .join("; ")}`,
+        "error",
+      ),
+    );
+  }, []);
+  // Switching school or session loads that slice of data from the server.
+  const firstLoad = useRef(true);
+  useEffect(() => {
+    if (!live) return;
+    if (firstLoad.current) {
+      firstLoad.current = false;
+      return;
+    }
+    reload().catch((e) => notify(e.message, "error"));
+  }, [schoolId, session]);
+  useEffect(() => {
+    if (live) return;
     if (!saveData(data))
       notify(
         "Browser storage is full. Remove large photo files or reset the preview.",
@@ -147,6 +263,7 @@ export default function App() {
       );
   }, [data]);
   useEffect(() => {
+    if (live) return;
     const sync = (e) => {
       if (e.key === STORAGE_KEY && e.newValue) {
         try {
@@ -181,16 +298,16 @@ export default function App() {
     window.addEventListener("keydown", listener);
     return () => window.removeEventListener("keydown", listener);
   }, []);
-  const availableSchools =
-    role === "premium"
+  const availableSchools = live
+    ? data.schools
+    : role === "premium"
       ? data.schools.filter((s) => s.agent === "AG-001")
       : role === "regular"
         ? data.schools.filter((s) => s.agent === "AG-002")
         : data.schools;
-  const school =
-    availableSchools.find((s) => s.id === schoolId) ||
+  const school = availableSchools.find((s) => s.id === schoolId) ||
     availableSchools[0] ||
-    data.schools[0];
+    data.schools[0] || { id: "", name: "No school yet", short: "—" };
   const go = (target) => {
     setPage(target);
     setMobileNav(false);
@@ -209,8 +326,10 @@ export default function App() {
       window.history.replaceState({}, "", u);
     }
   };
-  const userProfile =
-    data.profiles?.[role] ||
+  const liveAgent = live && data.agents.find((a) => a.id === data.me.agentId);
+  const userProfile = live
+    ? { name: data.me.name, email: data.me.email, phone: "" }
+    : data.profiles?.[role] ||
     (role === "school"
       ? data.profile
       : role === "super"
@@ -225,6 +344,12 @@ export default function App() {
   const ctx = {
     data,
     update,
+    live,
+    api,
+    reload,
+    permissions: data.permissions || {},
+    download: (path, name) =>
+      downloadFile(path, name).catch((e) => notify(e.message, "error")),
     role,
     school,
     schoolId: school.id,
@@ -376,6 +501,7 @@ export default function App() {
         </>
       ) : (
         <>
+          {live && syncing > 0 && <div className="sync-indicator">Saving…</div>}
           {mobileNav && (
             <button
               className="nav-scrim"
@@ -405,9 +531,11 @@ export default function App() {
                     ? "Platform administration"
                     : role === "school"
                       ? school.name
-                      : role === "regular"
-                        ? "Papertrail Studio"
-                        : "Northstar Print Co."}
+                      : live
+                        ? liveAgent?.company || liveAgent?.name || data.me.name
+                        : role === "regular"
+                          ? "Papertrail Studio"
+                          : "Northstar Print Co."}
                 </small>
               </div>
             </div>
@@ -475,6 +603,19 @@ export default function App() {
             </div>
           </aside>
           <div className="main-shell">
+            {live && auth.impersonating() && (
+              <div className="impersonation-bar" role="status">
+                <Icon name="userCog" size={15} />
+                <span>
+                  You are working as <strong>{data.me.name}</strong> ({selectedRole.name}).
+                  Every action is logged under your super admin account.
+                </span>
+                <Button variant="secondary" onClick={() => auth.stopImpersonating()}>
+                  Return to super admin
+                </Button>
+              </div>
+            )}
+
             <header className="topbar">
               <div className="breadcrumbs">
                 <IconButton
@@ -491,7 +632,16 @@ export default function App() {
                 <strong>{pageNames[page]}</strong>
               </div>
               <div className="topbar-right">
-                {roleControl}
+                {live ? (
+                  <AccountMenu
+                    me={data.me}
+                    roleName={selectedRole.name}
+                    syncing={syncing}
+                    notify={notify}
+                  />
+                ) : (
+                  roleControl
+                )}
                 <span className="header-separator" />
                 <button
                   className="icon-btn"
@@ -553,9 +703,15 @@ export default function App() {
               <div className="workspace-context">
                 <div>
                   <span className="demo-dot" />
-                  <span>DEMO WORKSPACE</span>
+                  <span>{live ? school.name.toUpperCase() : "DEMO WORKSPACE"}</span>
                   <span className="context-divider">/</span>
-                  <span>Fictional data · changes stay in this browser</span>
+                  <span>
+                    {live
+                      ? syncing
+                        ? "Saving changes…"
+                        : "All changes saved"
+                      : "Fictional data · changes stay in this browser"}
+                  </span>
                 </div>
                 <div>
                   <Icon name="calendar" size={14} />
@@ -662,6 +818,93 @@ export default function App() {
             >
               Reset preview
             </Button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function AccountMenu({ me, roleName, syncing, notify }) {
+  const [open, setOpen] = useState(false),
+    [picker, setPicker] = useState(false),
+    [users, setUsers] = useState([]),
+    [q, setQ] = useState("");
+  const canOpen = me.role === "SUPER_ADMIN" && !auth.impersonating();
+  useEffect(() => {
+    if (picker) api.get("/users").then((r) => setUsers(r.items.filter((u) => u.role !== "SUPER_ADMIN"))).catch((e) => notify(e.message, "error"));
+  }, [picker]);
+  const list = users.filter((u) => `${u.name} ${u.email} ${u.schoolName || ""} ${u.agentCode || ""}`.toLowerCase().includes(q.toLowerCase()));
+  return (
+    <div className="role-switcher">
+      <button className="role-trigger" onClick={() => setOpen(!open)} aria-expanded={open} aria-haspopup="menu">
+        <span className="role-icon">
+          <Icon name="user" size={17} />
+        </span>
+        <span>
+          <small>{roleName.toUpperCase()}</small>
+          <strong>{me.name}</strong>
+        </span>
+        <Icon name="down" size={15} />
+      </button>
+      {open && (
+        <>
+          <button className="popover-dismiss" aria-label="Close account menu" onClick={() => setOpen(false)} />
+          <div className="role-menu" role="menu">
+            <p>{me.email}</p>
+            {canOpen && (
+              <button role="menuitem" onClick={() => (setPicker(true), setOpen(false))}>
+                <span>
+                  <Icon name="userCog" />
+                </span>
+                <div>
+                  <strong>Open a school or agent account</strong>
+                  <small>Work as them with full rights; actions stay logged to you</small>
+                </div>
+              </button>
+            )}
+            <button role="menuitem" onClick={() => auth.logout()}>
+              <span>
+                <Icon name="logOut" />
+              </span>
+              <div>
+                <strong>{auth.impersonating() ? "Return to super admin" : "Sign out"}</strong>
+                <small>{syncing ? "Saving changes…" : "All changes are saved"}</small>
+              </div>
+            </button>
+          </div>
+        </>
+      )}
+      {picker && (
+        <Modal title="Open an account" subtitle="Choose a school admin or agent login." onClose={() => setPicker(false)}>
+          <div className="modal-body">
+            <input className="search-input" placeholder="Search by name, email, school or agent code" value={q} onChange={(e) => setQ(e.target.value)} autoFocus />
+            <div className="account-list">
+              {list.map((u) => (
+                <button
+                  key={u.id}
+                  className="link-row"
+                  onClick={async () => {
+                    try {
+                      await auth.impersonate(u.id);
+                    } catch (e) {
+                      notify(e.message, "error");
+                    }
+                  }}
+                >
+                  <Avatar name={u.name} />
+                  <span>
+                    <strong>{u.name}</strong>
+                    <small>
+                      {u.role === "AGENT" ? `Agent ${u.agentCode} · ${u.agentTier?.toLowerCase()}` : u.schoolName} · {u.email}
+                      {u.status === "INVITED" ? " · setup pending" : ""}
+                    </small>
+                  </span>
+                  <Icon name="external" size={16} />
+                </button>
+              ))}
+              {!list.length && <p className="muted">No matching logins.</p>}
+            </div>
           </div>
         </Modal>
       )}

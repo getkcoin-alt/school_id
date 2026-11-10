@@ -1,0 +1,571 @@
+// ID Studio production data model.
+// Conventions: cuid primary keys, human-readable `code` columns for display
+// (SCH-001, AG-001, B-1042), soft deletes where history matters, and an
+// `ActivityLog` row for every mutating action.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  SUPER_ADMIN
+  AGENT
+  SCHOOL_ADMIN
+}
+
+enum UserStatus {
+  INVITED
+  ACTIVE
+  DISABLED
+}
+
+enum AgentTier {
+  PREMIUM
+  REGULAR
+}
+
+enum RecordStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum Audience {
+  STUDENT
+  STAFF
+  EVERYONE
+}
+
+enum StudentStatus {
+  DRAFT
+  INVITED
+  IN_REVIEW
+  CHANGES_REQUESTED
+  APPROVED
+  SUBMITTED_FOR_PRINT
+}
+
+enum PhotoSource {
+  UPLOAD
+  CAMERA
+  LIBRARY
+  PDF
+  IMPORT
+}
+
+enum TokenType {
+  ONBOARD
+  RESET_PASSWORD
+}
+
+enum InviteChannel {
+  EMAIL
+  LINK
+  WHATSAPP
+}
+
+enum BatchStatus {
+  SUBMITTED
+  IN_PROGRESS
+  PRINTED
+  DELIVERED
+  CANCELLED
+}
+
+enum FulfilledBy {
+  CENTRAL
+  AGENT
+}
+
+enum DesignKind {
+  ID_CARD
+  LANYARD
+}
+
+enum PdfStatus {
+  READY_FOR_REVIEW
+  REVIEWED
+  REJECTED
+}
+
+enum OutboxStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+model User {
+  id            String     @id @default(cuid())
+  email         String     @unique
+  passwordHash  String?
+  name          String
+  phone         String?
+  role          Role
+  status        UserStatus @default(INVITED)
+  agentId       String?
+  agent         Agent?     @relation(fields: [agentId], references: [id])
+  schoolId      String?
+  school        School?    @relation(fields: [schoolId], references: [id])
+  tokenVersion  Int        @default(0)
+  failedLogins  Int        @default(0)
+  lockedUntil   DateTime?
+  lastLoginAt   DateTime?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  authTokens    AuthToken[]
+  refreshTokens RefreshToken[]
+  notifications Notification[]
+
+  @@index([role])
+  @@index([agentId])
+  @@index([schoolId])
+}
+
+model AuthToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      TokenType
+  tokenHash String    @unique
+  otpHash   String?
+  attempts  Int       @default(0)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, type])
+}
+
+model RefreshToken {
+  id             String    @id @default(cuid())
+  userId         String
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash      String    @unique
+  familyId       String
+  impersonatorId String?
+  expiresAt      DateTime
+  revokedAt      DateTime?
+  replacedById   String?
+  userAgent      String?
+  ip             String?
+  createdAt      DateTime  @default(now())
+
+  @@index([userId])
+  @@index([familyId])
+}
+
+model Counter {
+  name  String @id
+  value Int    @default(0)
+}
+
+model Agent {
+  id                String       @id @default(cuid())
+  code              String       @unique
+  name              String
+  company           String?
+  email             String
+  phone             String?
+  tier              AgentTier    @default(REGULAR)
+  address           String?
+  city              String?
+  state             String?
+  country           String?      @default("India")
+  pin               String?
+  subscriptionStart DateTime?    @db.Date
+  subscriptionEnd   DateTime?    @db.Date
+  status            RecordStatus @default(ACTIVE)
+  printBySelf       Boolean      @default(false)
+  expiryNotified    Boolean      @default(false)
+  photoKey          String?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  deletedAt         DateTime?
+
+  users       User[]
+  schools     School[]
+  pdfUploads  PdfUpload[]
+  batches     PrintBatch[] @relation("BatchFulfiller")
+  designs     Design[]
+
+  @@index([tier, status])
+}
+
+model School {
+  id               String       @id @default(cuid())
+  code             String       @unique
+  name             String
+  shortName        String?
+  email            String?
+  phone            String?
+  principal        String?
+  address          String?
+  city             String?
+  state            String?
+  country          String?      @default("India")
+  pin              String?
+  color            String?
+  agentId          String?
+  agent            Agent?       @relation(fields: [agentId], references: [id])
+  status           RecordStatus @default(ACTIVE)
+  studentRounds    Int          @default(1)
+  staffRounds      Int          @default(1)
+  studentPermit    Boolean      @default(true)
+  staffPermit      Boolean      @default(true)
+  studentDesignId  String?
+  staffDesignId    String?
+  lanyardDesignId  String?
+  logoKey          String?
+  currentSession   String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  deletedAt        DateTime?
+
+  users         User[]
+  fields        SchoolField[]
+  sessions      AcademicSession[]
+  classes       SchoolClass[]
+  students      Student[]
+  staff         Staff[]
+  photos        PhotoAsset[]
+  pdfUploads    PdfUpload[]
+  orderForms    OrderForm[]
+  batches       PrintBatch[]
+  staffRoles    StaffRole[]
+
+  @@index([agentId])
+  @@index([status])
+}
+
+// Which fields a school prints on its cards and whether they are mandatory.
+model SchoolField {
+  id        String   @id @default(cuid())
+  schoolId  String
+  school    School   @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  audience  Audience
+  key       String
+  label     String
+  type      String   @default("text")
+  enabled   Boolean  @default(true)
+  required  Boolean  @default(false)
+  custom    Boolean  @default(false)
+  sortOrder Int      @default(0)
+
+  @@unique([schoolId, audience, key])
+}
+
+model AcademicSession {
+  id        String    @id @default(cuid())
+  schoolId  String
+  school    School    @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  name      String
+  startDate DateTime? @db.Date
+  endDate   DateTime? @db.Date
+  isCurrent Boolean   @default(false)
+  createdAt DateTime  @default(now())
+
+  @@unique([schoolId, name])
+}
+
+model SchoolClass {
+  id        String    @id @default(cuid())
+  schoolId  String
+  school    School    @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  name      String
+  sortOrder Int       @default(0)
+  sections  Section[]
+
+  @@unique([schoolId, name])
+}
+
+model Section {
+  id      String      @id @default(cuid())
+  classId String
+  class   SchoolClass @relation(fields: [classId], references: [id], onDelete: Cascade)
+  name    String
+
+  @@unique([classId, name])
+}
+
+model StaffRole {
+  id       String @id @default(cuid())
+  schoolId String
+  school   School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  name     String
+
+  @@unique([schoolId, name])
+}
+
+model Student {
+  id              String        @id @default(cuid())
+  code            String        @unique
+  schoolId        String
+  school          School        @relation(fields: [schoolId], references: [id])
+  session         String
+  className       String
+  section         String?
+  name            String
+  admissionNo     String?
+  srn             String?
+  photoNo         String?
+  rollNo          String?
+  fatherPrefix    String?
+  fatherName      String?
+  motherPrefix    String?
+  motherName      String?
+  dob             DateTime?     @db.Date
+  gender          String?
+  email           String?
+  phone           String?
+  address         String?
+  admissionDate   DateTime?     @db.Date
+  bloodGroup      String?
+  transport       String?
+  extra           Json          @default("{}")
+  status          StudentStatus @default(DRAFT)
+  active          Boolean       @default(true)
+  photoKey        String?
+  photoSource     PhotoSource?
+  photoCapturedAt DateTime?
+  invitedAt       DateTime?
+  submittedAt     DateTime?
+  approvedAt      DateTime?
+  approvedById    String?
+  reviewNote      String?
+  promotedFromId  String?
+  version         Int           @default(1)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  deletedAt       DateTime?
+
+  invitations Invitation[]
+  batchItems  PrintBatchItem[]
+
+  @@unique([schoolId, session, admissionNo])
+  @@index([schoolId, session, className, section])
+  @@index([schoolId, status])
+  @@index([schoolId, name])
+}
+
+model Staff {
+  id          String        @id @default(cuid())
+  code        String        @unique
+  schoolId    String
+  school      School        @relation(fields: [schoolId], references: [id])
+  session     String?
+  name        String
+  role        String?
+  email       String?
+  phone       String?
+  address     String?
+  gender      String?
+  dob         DateTime?     @db.Date
+  className   String?
+  section     String?
+  extra       Json          @default("{}")
+  photoKey    String?
+  photoSource PhotoSource?
+  status      RecordStatus  @default(ACTIVE)
+  reviewStatus StudentStatus @default(IN_REVIEW)
+  approvedAt  DateTime?
+  version     Int           @default(1)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  deletedAt   DateTime?
+
+  batchItems PrintBatchItem[]
+
+  @@index([schoolId, reviewStatus])
+}
+
+model Invitation {
+  id           String        @id @default(cuid())
+  studentId    String
+  student      Student       @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  tokenHash    String        @unique
+  channel      InviteChannel
+  sentTo       String?
+  createdById  String?
+  expiresAt    DateTime
+  sentAt       DateTime?
+  openedAt     DateTime?
+  verifiedAt   DateTime?
+  submittedAt  DateTime?
+  revokedAt    DateTime?
+  otpHash      String?
+  otpExpiresAt DateTime?
+  otpAttempts  Int           @default(0)
+  createdAt    DateTime      @default(now())
+
+  @@index([studentId])
+}
+
+model PhotoAsset {
+  id           String   @id @default(cuid())
+  schoolId     String
+  school       School   @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  fileName     String
+  storageKey   String
+  mime         String
+  size         Int
+  checksum     String
+  uploadedById String?
+  createdAt    DateTime @default(now())
+
+  @@unique([schoolId, fileName])
+}
+
+model PdfUpload {
+  id           String    @id @default(cuid())
+  schoolId     String
+  school       School    @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  agentId      String?
+  agent        Agent?    @relation(fields: [agentId], references: [id])
+  fileName     String
+  storageKey   String
+  size         Int
+  pages        Int?
+  note         String?
+  status       PdfStatus @default(READY_FOR_REVIEW)
+  uploadedById String?
+  createdAt    DateTime  @default(now())
+
+  @@index([schoolId])
+}
+
+model OrderForm {
+  id           String      @id @default(cuid())
+  schoolId     String
+  school       School      @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  batchId      String?
+  batch        PrintBatch? @relation(fields: [batchId], references: [id])
+  fileName     String
+  storageKey   String
+  mime         String
+  size         Int
+  note         String?
+  uploadedById String?
+  createdAt    DateTime    @default(now())
+
+  @@index([schoolId])
+}
+
+model Design {
+  id          String     @id @default(cuid())
+  code        String     @unique
+  name        String
+  kind        DesignKind @default(ID_CARD)
+  audience    Audience   @default(STUDENT)
+  color       String?
+  frontKey    String?
+  backKey     String?
+  agentId     String?
+  agent       Agent?     @relation(fields: [agentId], references: [id])
+  createdById String?
+  createdAt   DateTime   @default(now())
+  deletedAt   DateTime?
+}
+
+model PrintBatch {
+  id               String        @id @default(cuid())
+  code             String        @unique
+  name             String
+  schoolId         String
+  school           School        @relation(fields: [schoolId], references: [id])
+  session          String?
+  status           BatchStatus   @default(SUBMITTED)
+  fulfilledBy      FulfilledBy   @default(CENTRAL)
+  fulfillerAgentId String?
+  fulfillerAgent   Agent?        @relation("BatchFulfiller", fields: [fulfillerAgentId], references: [id])
+  designName       String?
+  carrier          String?
+  tracking         String?
+  studentCount     Int           @default(0)
+  staffCount       Int           @default(0)
+  createdById      String?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  printedAt        DateTime?
+  deliveredAt      DateTime?
+
+  items      PrintBatchItem[]
+  orderForms OrderForm[]
+
+  @@index([schoolId])
+  @@index([status, fulfilledBy])
+}
+
+// Immutable snapshot of a record at the moment it was sent to print.
+model PrintBatchItem {
+  id        String     @id @default(cuid())
+  batchId   String
+  batch     PrintBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  kind      Audience
+  studentId String?
+  student   Student?   @relation(fields: [studentId], references: [id])
+  staffId   String?
+  staff     Staff?     @relation(fields: [staffId], references: [id])
+  snapshot  Json
+  photoKey  String?
+  photoNo   String
+  sortName  String
+  className String?
+
+  @@index([batchId])
+}
+
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  body      String?
+  link      String?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, readAt])
+}
+
+model ActivityLog {
+  id             String   @id @default(cuid())
+  actorId        String?
+  actorName      String?
+  actorRole      Role?
+  impersonatorId String?
+  schoolId       String?
+  agentId        String?
+  action         String
+  entityType     String?
+  entityId       String?
+  summary        String
+  meta           Json     @default("{}")
+  ip             String?
+  createdAt      DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([schoolId, createdAt])
+  @@index([agentId, createdAt])
+  @@index([actorId, createdAt])
+}
+
+model EmailOutbox {
+  id        String       @id @default(cuid())
+  to        String
+  subject   String
+  html      String
+  text      String
+  kind      String
+  status    OutboxStatus @default(PENDING)
+  attempts  Int          @default(0)
+  lastError String?
+  sentAt    DateTime?
+  createdAt DateTime     @default(now())
+
+  @@index([status, createdAt])
+}

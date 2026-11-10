@@ -14,7 +14,13 @@ import {
   Empty,
   CardPreview,
 } from "../components.jsx";
-import { studentLink, uid, fmtDate, validateStudent } from "../lib.js";
+import {
+  studentLink,
+  uid,
+  fmtDate,
+  validateStudent,
+  schoolFieldList,
+} from "../lib.js";
 import { FIELDS } from "../data.js";
 import { StudentEditor } from "./Students.jsx";
 export function Invitations({ ctx }) {
@@ -249,10 +255,15 @@ export function Invitations({ ctx }) {
                         label={"Copy invitation for " + s.name}
                         onClick={async () => {
                           try {
-                            await navigator.clipboard.writeText(
-                              studentLink(s.id),
+                            const link = ctx.live
+                              ? (await ctx.api.post("/invitations/link", { studentId: s.id })).url
+                              : studentLink(s.id);
+                            await navigator.clipboard.writeText(link);
+                            notify(
+                              ctx.live
+                                ? `Personal link for ${s.name} copied. Earlier links for this student stop working.`
+                                : "Demo invitation link copied.",
                             );
-                            notify("Demo invitation link copied.");
                           } catch {
                             notify(
                               "Clipboard unavailable. Open the link and copy its address.",
@@ -261,16 +272,18 @@ export function Invitations({ ctx }) {
                           }
                         }}
                       />
-                      <a
-                        className="icon-btn"
-                        href={studentLink(s.id)}
-                        target="_blank"
-                        rel="noreferrer"
-                        aria-label={"Preview student link for " + s.name}
-                        title="Open student link"
-                      >
-                        <Icon name="external" size={17} />
-                      </a>
+                      {!ctx.live && (
+                        <a
+                          className="icon-btn"
+                          href={studentLink(s.id)}
+                          target="_blank"
+                          rel="noreferrer"
+                          aria-label={"Preview student link for " + s.name}
+                          title="Open student link"
+                        >
+                          <Icon name="external" size={17} />
+                        </a>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -356,12 +369,15 @@ export function Invitations({ ctx }) {
             <div className="success-circle">
               <Icon name="check" size={30} />
             </div>
-            <h3 className="centered">{sent.length} sample emails prepared</h3>
+            <h3 className="centered">
+              {sent.length} {ctx.live ? "emails queued" : "sample emails prepared"}
+            </h3>
             <p className="centered muted">
-              The demo outbox contains every personal link. No external messages
-              were sent.
+              {ctx.live
+                ? "Each student receives a personal link that expires in 14 days. Students without an email can be sent a copied link."
+                : "The demo outbox contains every personal link. No external messages were sent."}
             </p>
-            {sent.slice(0, 3).map((s) => (
+            {!ctx.live && sent.slice(0, 3).map((s) => (
               <a
                 className="link-row"
                 key={s.id}
@@ -452,9 +468,7 @@ export function ReviewQueue({ ctx }) {
   const current = chosen ? data.students.find((s) => s.id === chosen) : list[0];
   const approve = () => {
     if (!current) return;
-    const fields = FIELDS.filter((f) =>
-      (data.fieldScope[school.id] || data.enabledFields).includes(f[0]),
-    );
+    const fields = schoolFieldList(data, school.id);
     if (
       !current.photo ||
       Object.keys(validateStudent(current, fields)).length

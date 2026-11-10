@@ -10,7 +10,7 @@ import {
   CardPreview,
   Badge,
 } from "../components.jsx";
-import { validateStudent } from "../lib.js";
+import { validateStudent, schoolFieldList, optionsFor } from "../lib.js";
 export default function StudentPortal({ ctx }) {
   const { data, update, notify, log } = ctx;
   const q = new URLSearchParams(window.location.search);
@@ -71,8 +71,7 @@ export default function StudentPortal({ ctx }) {
       </div>
     );
   const design = data.schoolDesigns?.[school.id] || data.design;
-  const keys = data.fieldScope[school.id] || data.enabledFields;
-  const fields = FIELDS.filter((f) => keys.includes(f[0]));
+  const fields = schoolFieldList(data, school.id);
   const change = (key, val) => {
     setDraft((d) => ({ ...d, [key]: val }));
     setErrors((e) => ({ ...e, [key]: null }));
@@ -363,9 +362,7 @@ export default function StudentPortal({ ctx }) {
                         error={errors[key]}
                         className={key === "address" ? "span-two" : ""}
                       >
-                        {["class", "section", "gender", "blood"].includes(
-                          type,
-                        ) ? (
+                        {optionsFor(type, data) ? (
                           <select
                             value={draft[key] || ""}
                             onChange={(e) => change(key, e.target.value)}
@@ -373,28 +370,7 @@ export default function StudentPortal({ ctx }) {
                             <option value="">
                               Choose {label.toLowerCase()}
                             </option>
-                            {(type === "class"
-                              ? data.classes
-                              : type === "section"
-                                ? data.sections
-                                : type === "gender"
-                                  ? [
-                                      "Male",
-                                      "Female",
-                                      "Other",
-                                      "Prefer not to say",
-                                    ]
-                                  : [
-                                      "A+",
-                                      "A−",
-                                      "B+",
-                                      "B−",
-                                      "AB+",
-                                      "AB−",
-                                      "O+",
-                                      "O−",
-                                    ]
-                            ).map((o) => (
+                            {optionsFor(type, data).map((o) => (
                               <option key={o}>{o}</option>
                             ))}
                           </select>

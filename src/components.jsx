@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
+  EyeOff,
+  UserCog,
   ArrowRight,
   X,
   ChevronRight,
@@ -71,6 +73,9 @@ import {
 } from "lucide-react";
 import { initials, cardPDF } from "./lib.js";
 const icons = {
+  eyeOff: EyeOff,
+  logOut: LogOut,
+  userCog: UserCog,
   arrow: ArrowRight,
   x: X,
   chevron: ChevronRight,
