@@ -7077,3 +7077,34 @@ td small {
   border-radius: 10px;
   box-sizing: content-box;
 }
+
+.logins {
+  display: grid;
+  gap: 10px;
+  margin: 18px 0;
+}
+.login-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.login-row small {
+  display: block;
+  color: #8e98a4;
+  font-size: 11px;
+  margin-top: 3px;
+}
+.login-row small.error {
+  color: #b95249;
+}
+.login-add {
+  display: grid;
+  gap: 12px;
+}
+.login-add .btn {
+  justify-self: start;
+}

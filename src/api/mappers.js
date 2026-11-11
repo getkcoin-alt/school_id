@@ -42,6 +42,7 @@ export const fromSchool = (s) => ({
   currentSession: s.currentSession,
   studentDesignId: s.studentDesignId,
   logoUrl: s.logoUrl,
+  studentCount: s.studentCount,
 });
 export const toSchool = (s) => ({
   name: s.name,

@@ -460,9 +460,11 @@ export function ReviewQueue({ ctx }) {
     [reason, setReason] = useState(""),
     [edit, setEdit] = useState(null),
     [rejection, setRejection] = useState(false);
+  // Students who never used their link can be completed and approved here directly.
+  const inTab = (s, t) => (t === "Not submitted" ? ["Draft", "Invited"].includes(s.status) : s.status === t);
   const list = schoolStudents.filter(
     (s) =>
-      s.status === tab &&
+      inTab(s, tab) &&
       `${s.name} ${s.admission}`.toLowerCase().includes(query.toLowerCase()),
   );
   const current = chosen ? data.students.find((s) => s.id === chosen) : list[0];
@@ -552,7 +554,7 @@ export function ReviewQueue({ ctx }) {
         </div>
       )}
       <div className="review-tabs">
-        {["In review", "Approved", "Changes requested"].map((t) => (
+        {["In review", "Not submitted", "Changes requested", "Approved"].map((t) => (
           <button
             className={t === tab ? "active" : ""}
             key={t}
@@ -562,7 +564,7 @@ export function ReviewQueue({ ctx }) {
             }}
           >
             {t}
-            <span>{schoolStudents.filter((s) => s.status === t).length}</span>
+            <span>{schoolStudents.filter((s) => inTab(s, t)).length}</span>
           </button>
         ))}
       </div>
@@ -678,6 +680,12 @@ export function ReviewQueue({ ctx }) {
                 </div>
               </div>
               <div className="review-bottom">
+                {["Draft", "Invited"].includes(current.status) && (
+                  <Callout icon="edit">
+                    Not submitted by the student. You can fill in the details and photo with
+                    Edit manually and approve directly; the student link is optional.
+                  </Callout>
+                )}
                 <Callout icon="shield">
                   A camera photo alone does not prove identity. Compare it with
                   the school’s record. Automated liveness and identity

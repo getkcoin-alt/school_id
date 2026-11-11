@@ -69,6 +69,16 @@ const designFields = {
   lanyardDesignId: z.string().optional().nullable(),
 };
 
+/** Students per school in each school's current session (used by the schools lists). */
+export async function studentCounts(schools: { id: string; currentSession: string | null }[]) {
+  if (!schools.length) return new Map<string, number>();
+  const rows = await prisma.student.groupBy({ by: ["schoolId", "session"], where: { schoolId: { in: schools.map((s) => s.id) }, deletedAt: null }, _count: true });
+  const current = new Map(schools.map((s) => [s.id, s.currentSession]));
+  const out = new Map<string, number>();
+  for (const r of rows) if (r.session === current.get(r.schoolId)) out.set(r.schoolId, r._count);
+  return out;
+}
+
 const DEFAULT_CLASSES = ["Nursery", "LKG", "UKG", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII"];
 
 export async function schoolRoutes(app: FastifyInstance) {
@@ -87,7 +97,8 @@ export async function schoolRoutes(app: FastifyInstance) {
       include: { agent: true },
       orderBy: { name: "asc" },
     });
-    return { items: await Promise.all(schools.map(serializeSchool)) };
+    const counts = await studentCounts(schools);
+    return { items: await Promise.all(schools.map(async (s) => ({ ...(await serializeSchool(s)), studentCount: counts.get(s.id) ?? 0 }))) };
   });
 
   // Change sheet #10: batch creation/review lists only schools that have cards ready.

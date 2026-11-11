@@ -40,9 +40,9 @@ export default function Dashboard({ ctx }) {
         ],
         [
           "email",
-          "Invitations pending",
+          "Details pending",
           pending,
-          "A little nudge goes a long way",
+          "Fill in yourself or send the student link",
           "amber",
         ],
         [

@@ -328,6 +328,20 @@ describe("super admin access and activity logs", () => {
   });
 });
 
+describe("school lists", () => {
+  it("report student totals per school and the state of each setup email", async () => {
+    const ws = (await api(app, root).get("/workspace")).json();
+    const gsss = ws.schools.find((s: { id: string }) => s.id === ctx.schoolId);
+    const stored = await prisma.student.count({ where: { schoolId: ctx.schoolId, session: gsss.currentSession, deletedAt: null } });
+    expect(gsss.studentCount).toBe(stored);
+    expect(stored).toBeGreaterThan(0);
+    const list = (await api(app, root).get("/schools")).json().items;
+    expect(list.find((s: { id: string }) => s.id === ctx.schoolId).studentCount).toBe(stored);
+    const users = (await api(app, root).get(`/users?schoolId=${ctx.schoolId}`)).json().items;
+    expect(users[0].setupEmail.status).toBe("SENT");
+  });
+});
+
 describe("partial updates", () => {
   it("leaves fields that were not sent untouched", async () => {
     const st = await api(app, ctx.school).post("/students", { name: "Partial Kid", className: "VI", fatherPrefix: "Mr.", fatherName: "Ram", phone: "9876501234", email: "pk@test.in" });

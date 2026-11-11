@@ -14,6 +14,7 @@ import {
   Callout,
   Empty,
 } from "../components.jsx";
+import { auth } from "../api/client.js";
 import {
   uid,
   fmtDate,
@@ -22,6 +23,94 @@ import {
   csvText,
   requiredKeys,
 } from "../lib.js";
+/** Live mode: the logins of a school or an agent, with setup-email status and resend. */
+export function Logins({ ctx, schoolId, agentId, defaultName = "", defaultEmail = "" }) {
+  const [users, setUsers] = useState(null),
+    [name, setName] = useState(defaultName),
+    [email, setEmail] = useState(defaultEmail),
+    [busy, setBusy] = useState(false);
+  const load = () =>
+    ctx.api
+      .get(`/users?${schoolId ? `schoolId=${schoolId}` : `agentId=${agentId}`}`)
+      .then((r) => setUsers(r.items))
+      .catch((e) => ctx.notify(e.message, "error"));
+  useEffect(() => {
+    load();
+  }, [schoolId, agentId]);
+  const run = async (fn, ok) => {
+    setBusy(true);
+    try {
+      await fn();
+      ctx.notify(ok);
+      await load();
+    } catch (e) {
+      ctx.notify(e.message, "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const mail = (u) =>
+    u.status === "ACTIVE" && !u.setupEmail
+      ? "Account set up"
+      : u.status === "ACTIVE"
+        ? "Password set"
+        : !u.setupEmail
+          ? "No setup email sent yet"
+          : u.setupEmail.status === "SENT"
+            ? `Setup email sent ${new Date(u.setupEmail.sentAt).toLocaleString("en-IN")}`
+            : u.setupEmail.status === "FAILED"
+              ? `Setup email failed: ${u.setupEmail.error || "unknown error"}`
+              : `Setup email not delivered yet${u.setupEmail.error ? `: ${u.setupEmail.error}` : ""}`;
+  return (
+    <div className="logins">
+      <h3>Logins</h3>
+      {users === null && <p className="muted">Loading…</p>}
+      {users?.map((u) => (
+        <div className="login-row" key={u.id}>
+          <div>
+            <strong>{u.name}</strong>
+            <small>
+              {u.email} · {u.status === "INVITED" ? "Waiting for password" : u.status === "DISABLED" ? "Disabled" : "Active"}
+            </small>
+            <small className={u.setupEmail && u.setupEmail.status !== "SENT" && u.status !== "ACTIVE" ? "error" : ""}>{mail(u)}</small>
+          </div>
+          <span className="row-actions">
+            {u.status === "INVITED" && (
+              <Button variant="secondary" icon="send" disabled={busy} onClick={() => run(() => ctx.api.post(`/users/${u.id}/resend-invite`, {}), `Setup email sent to ${u.email}.`)}>
+                Resend setup email
+              </Button>
+            )}
+            {ctx.role === "super" && u.status !== "DISABLED" && (
+              <Button variant="secondary" icon="userCog" onClick={() => auth.impersonate(u.id).catch((e) => ctx.notify(e.message, "error"))}>
+                Open account
+              </Button>
+            )}
+          </span>
+        </div>
+      ))}
+      {users && schoolId && (
+        <div className="login-add">
+          {!users.length && <Callout tone="amber">This school has no admin login yet. Add one and they will get an email to set their password.</Callout>}
+          <div className="form-grid">
+            <Field label="Admin name">
+              <input value={name} onChange={(e) => setName(e.target.value)} />
+            </Field>
+            <Field label="Admin login email">
+              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+            </Field>
+          </div>
+          <Button
+            icon="plus"
+            disabled={busy || name.trim().length < 2 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)}
+            onClick={() => run(() => ctx.api.post("/users", { role: "SCHOOL_ADMIN", schoolId, name: name.trim(), email: email.trim() }), `Login created. A setup email was sent to ${email.trim()}.`).then(() => setEmail(""))}
+          >
+            Add school admin login
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
 export function SchoolForm({ ctx, value, onClose }) {
   const { data, update, notify, log } = ctx;
   const [s, setS] = useState(
@@ -39,7 +128,7 @@ export function SchoolForm({ ctx, value, onClose }) {
           state: "Rajasthan",
           country: "India",
           pin: "",
-          agent: ctx.role === "regular" ? "AG-002" : "AG-001",
+          agent: ctx.live ? (ctx.role === "super" ? "" : ctx.data.me?.agentId || "") : ctx.role === "regular" ? "AG-002" : "AG-001",
           status: "Active",
           studentRounds: 1,
           staffRounds: 1,
@@ -61,19 +150,24 @@ export function SchoolForm({ ctx, value, onClose }) {
       );
       return;
     }
+    const saved = ctx.live && !value?.id ? { ...s, adminEmail: (s.adminEmail ?? s.email ?? "").trim(), adminName: (s.adminName ?? s.principal ?? "").trim() || s.name } : s;
+    if (ctx.live && !value?.id && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(saved.adminEmail)) {
+      setError("Enter the school admin's login email.");
+      return;
+    }
     update((d) =>
       log(
         {
           ...d,
           schools: value?.id
             ? d.schools.map((x) => (x.id === s.id ? s : x))
-            : [...d.schools, s],
+            : [...d.schools, saved],
         },
         `${value ? "Updated" : "Created"} school ${s.name}`,
         "school",
       ),
     );
-    notify("School details saved.");
+    notify(ctx.live && !value?.id ? `School saved. A setup email is on its way to ${saved.adminEmail}.` : "School details saved.");
     onClose();
   };
   return (
@@ -115,11 +209,12 @@ export function SchoolForm({ ctx, value, onClose }) {
                 value={s.agent}
                 onChange={(e) => set("agent", e.target.value)}
               >
+                {ctx.live && ctx.role === "super" && <option value="">No agent (managed by ID Studio)</option>}
                 {data.agents
                   .filter(
                     (a) =>
                       ctx.role === "super" ||
-                      a.id === (ctx.role === "regular" ? "AG-002" : "AG-001"),
+                      a.id === (ctx.live ? ctx.data.me?.agentId : ctx.role === "regular" ? "AG-002" : "AG-001"),
                   )
                   .map((a) => (
                     <option key={a.id} value={a.id}>
@@ -156,6 +251,17 @@ export function SchoolForm({ ctx, value, onClose }) {
               </select>
             </Field>
           </div>
+          {ctx.live && !value?.id && (
+            <div className="form-grid">
+              <Field label="School admin name" hint="The person who will manage this school.">
+                <input value={s.adminName ?? s.principal ?? ""} onChange={(e) => set("adminName", e.target.value)} />
+              </Field>
+              <Field label="School admin login email" required hint="They get an email to set their password.">
+                <input type="email" required value={s.adminEmail ?? s.email ?? ""} onChange={(e) => set("adminEmail", e.target.value)} />
+              </Field>
+            </div>
+          )}
+          {ctx.live && value?.id && <Logins ctx={ctx} schoolId={value.id} defaultName={value.principal} defaultEmail={value.email} />}
           {error && <p className="error">{error}</p>}
           <Callout icon="settings">
             Card fields and extra fields are managed in the school’s Settings
@@ -264,7 +370,7 @@ export function Schools({ ctx }) {
                       "Unassigned"}
                   </td>
                   <td>
-                    {data.students.filter((x) => x.school === s.id).length}
+                    {ctx.live ? (s.studentCount ?? 0) : data.students.filter((x) => x.school === s.id).length}
                   </td>
                   <td>
                     <Badge>{s.status}</Badge>
@@ -342,13 +448,16 @@ export function Schools({ ctx }) {
                 </div>
               ))}
             </dl>
+            {ctx.live && <Logins ctx={ctx} schoolId={detail.id} defaultName={detail.principal} defaultEmail={detail.email} />}
             <div className="button-row">
-              <a
-                className="btn secondary"
-                href={`/?panel=school&school=${detail.id}`}
-              >
-                Open School Admin <Icon name="external" size={15} />
-              </a>
+              {!ctx.live && (
+                <a
+                  className="btn secondary"
+                  href={`/?panel=school&school=${detail.id}`}
+                >
+                  Open School Admin <Icon name="external" size={15} />
+                </a>
+              )}
               <Button
                 onClick={() => {
                   setSchoolId(detail.id);
@@ -611,6 +720,11 @@ export function Agents({ ctx }) {
                 </select>
               </Field>
             </div>
+            {ctx.live && data.agents.some((a) => a.id === edit.id) && (
+              <div className="padded">
+                <Logins ctx={ctx} agentId={edit.id} />
+              </div>
+            )}
             <div className="modal-actions">
               <Button variant="secondary" onClick={() => setEdit(null)}>
                 Cancel

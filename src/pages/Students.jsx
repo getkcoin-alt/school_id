@@ -887,6 +887,23 @@ export default function Students({ ctx }) {
             >
               Edit details
             </Button>
+            {["school", "super"].includes(ctx.role) && !["Approved", "Submitted for print"].includes(view.status) && (
+              <Button
+                icon="check"
+                onClick={() => {
+                  const fields = schoolFieldList(data, school.id);
+                  if (!view.photo || Object.keys(validateStudent(view, fields)).length) {
+                    notify("Fill the compulsory fields and add a photo (Edit details) before approving.", "error");
+                    return;
+                  }
+                  update((d) => log({ ...d, students: d.students.map((x) => (x.id === view.id ? { ...x, status: "Approved", note: "" } : x)) }, `Approved ${view.name}`, "review"));
+                  notify(`${view.name} approved for printing.`);
+                  setView(null);
+                }}
+              >
+                Approve
+              </Button>
+            )}
             <PDFProofButton
               students={[view]}
               school={school}

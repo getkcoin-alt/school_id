@@ -40,7 +40,16 @@ export async function userRoutes(app: FastifyInstance) {
     else where.agentId = p.agentId;
     if (q.search) where.OR = [{ name: { contains: q.search, mode: "insensitive" } }, { email: { contains: q.search, mode: "insensitive" } }];
     const users = await prisma.user.findMany({ where, include: { agent: true, school: true }, orderBy: { name: "asc" }, take: 500 });
-    return { items: users.map(serializeUser) };
+    // Delivery state of each person's latest setup email, so a failed send is visible.
+    const mails = await prisma.emailOutbox.findMany({ where: { kind: "onboard", to: { in: users.map((u) => u.email) } }, orderBy: { createdAt: "desc" }, select: { to: true, status: true, lastError: true, createdAt: true, sentAt: true } });
+    const last = new Map<string, (typeof mails)[number]>();
+    for (const m of mails) if (!last.has(m.to)) last.set(m.to, m);
+    return {
+      items: users.map((u) => {
+        const m = last.get(u.email);
+        return { ...serializeUser(u), setupEmail: m ? { status: m.status, error: m.lastError, queuedAt: m.createdAt, sentAt: m.sentAt } : null };
+      }),
+    };
   });
 
   // Super admin adds a login for a school or an agent; a school admin may add colleagues.

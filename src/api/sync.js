@@ -104,7 +104,7 @@ export async function pushChanges(prev, next, schoolId) {
 
   // Schools and agents (super admin; agents edit their own profile).
   diff(prev.schools, next.schools, {
-    add: (s) => run(() => api.post("/schools", { ...toSchool(s), createDefaultClasses: true, ...(s.adminEmail ? { admin: { name: s.principal || s.name, email: s.adminEmail } } : {}) })),
+    add: (s) => run(() => api.post("/schools", { ...toSchool(s), createDefaultClasses: true, ...(s.adminEmail ? { admin: { name: s.adminName || s.principal || s.name, email: s.adminEmail } } : {}) })),
     update: (s) => run(() => api.patch(`/schools/${s.id}`, toSchool(s))),
     remove: (s) => run(() => api.del(`/schools/${s.id}`)),
   });

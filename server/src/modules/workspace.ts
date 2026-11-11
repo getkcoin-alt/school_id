@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { prisma } from "../lib/db.js";
 import { can, isAgent, isSuper, principal, schoolWhere } from "../lib/access.js";
-import { serializeSchool } from "./schools.js";
+import { serializeSchool, studentCounts } from "./schools.js";
 import { serializeAgent } from "./agents.js";
 import { schoolFields } from "../lib/fields.js";
 import { PREFIXES } from "../lib/students.js";
@@ -28,6 +28,7 @@ export async function workspaceRoutes(app: FastifyInstance) {
       prisma.design.findMany({ where: { deletedAt: null, ...(isSuper(p) ? {} : { OR: [{ agentId: null }, { agentId: p.agentId ?? selected?.agentId ?? "__none__" }] }) }, orderBy: { name: "asc" } }),
       prisma.notification.count({ where: { userId: p.userId, readAt: null } }),
     ]);
+    const perSchool = await studentCounts(schools);
     let school = null;
     if (selected) {
       const [studentFields, staffFields, classes, sessions, staffRoles, counts] = await Promise.all([
@@ -50,7 +51,7 @@ export async function workspaceRoutes(app: FastifyInstance) {
     return {
       me: { id: p.userId, name: p.name, email: p.email, role: p.role, agentId: p.agentId, agentTier: p.agentTier, schoolId: p.schoolId, impersonatorId: p.impersonatorId },
       permissions: Object.fromEntries(Object.entries(can).map(([k, fn]) => [k, fn(p)])),
-      schools: await Promise.all(schools.map(serializeSchool)),
+      schools: await Promise.all(schools.map(async (s) => ({ ...(await serializeSchool(s)), studentCount: perSchool.get(s.id) ?? 0 }))),
       agents: await Promise.all(agents.map(serializeAgent)),
       designs: designs.map((d) => ({ id: d.id, code: d.code, name: d.name, kind: d.kind, audience: d.audience, color: d.color })),
       school,
