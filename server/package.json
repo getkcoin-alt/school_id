@@ -17,7 +17,8 @@
     "db:migrate": "prisma migrate deploy",
     "db:migrate:dev": "prisma migrate dev",
     "db:seed": "tsx --env-file-if-exists=.env prisma/seed.ts",
-    "create-super-admin": "node dist/scripts/create-super-admin.js"
+    "create-super-admin": "node dist/scripts/create-super-admin.js",
+    "db:ensure": "node dist/scripts/ensure-database.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1165.0",
@@ -40,14 +41,14 @@
     "pdfkit": "^0.20.2",
     "pino": "^10.4.0",
     "sharp": "^0.35.5",
-    "zod": "^4.6.7"
+    "zod": "^4.6.7",
+    "prisma": "^6.19.3"
   },
   "devDependencies": {
     "@types/archiver": "^8.0.0",
     "@types/node": "^26.6.6",
     "@types/nodemailer": "^8.0.2",
     "@types/pdfkit": "^0.17.7",
-    "prisma": "^6.19.3",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vitest": "^5.1.0"

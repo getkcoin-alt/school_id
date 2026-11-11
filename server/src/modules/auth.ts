@@ -12,6 +12,8 @@ import { normaliseEmail } from "../lib/onboarding.js";
 import { serializeUser } from "./users.js";
 
 const COOKIE = "ids_rt";
+// Cookie path must match the browser-visible URL (e.g. /api/api/v1/auth behind an nginx /api/ prefix).
+const COOKIE_PATH = `${new URL(config.API_PUBLIC_URL).pathname.replace(/\/$/, "")}/api/v1/auth`;
 const MAX_FAILED = 5;
 const LOCK_MINUTES = 15;
 
@@ -49,7 +51,7 @@ async function issueSession(
       httpOnly: true,
       secure: isProd,
       sameSite: isProd ? "none" : "lax",
-      path: "/api/v1/auth",
+      path: COOKIE_PATH,
       maxAge: days * 86400,
     });
   return out;
@@ -111,7 +113,7 @@ export async function authRoutes(app: FastifyInstance) {
       await prisma.refreshToken.updateMany({ where: { familyId: req.principal.familyId }, data: { revokedAt: new Date() } });
     }
     // Ending an impersonation (token in the body) must not sign the super admin out.
-    if (!body.refreshToken) reply.clearCookie(COOKIE, { path: "/api/v1/auth" });
+    if (!body.refreshToken) reply.clearCookie(COOKIE, { path: COOKIE_PATH });
     return { ok: true };
   });
 

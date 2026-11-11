@@ -1,0 +1,57 @@
+# ID Card Studio web app: test, build against https://idstudio.in/api and serve on port 5173 (pm2 "IdCardFrontend").
+# CI/CD variables used: REPO_URL (server root password, as before). Optional: DEPLOY_HOST, VITE_API_URL.
+stages:
+  - build
+  - deploy
+
+variables:
+  DEPLOY_HOST: "69.62.75.171"
+  VITE_API_URL: "https://idstudio.in/api"
+
+build_job:
+  stage: build
+  image: node:22-bookworm
+  script:
+    - npm ci --no-audit --no-fund
+    - npm test
+    - npm run build
+  artifacts:
+    paths:
+      - dist/
+    expire_in: 1 day
+
+deploy:
+  stage: deploy
+  image: debian:bookworm-slim
+  needs: [build_job]
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq openssh-client sshpass >/dev/null
+  script:
+    - export SSHPASS="$REPO_URL"
+    - SSH="sshpass -e ssh -o StrictHostKeyChecking=no root@$DEPLOY_HOST"
+    - BASE=/mnt/vol1/Project/Frontend-v2
+    - RELEASE="$BASE/releases/$(date +%Y%m%d-%H%M%S)-$CI_COMMIT_SHORT_SHA"
+    - $SSH "mkdir -p $RELEASE"
+    - tar czf - -C dist . | $SSH "tar xzf - -C $RELEASE"
+    - |
+      $SSH "bash -s" <<EOF
+      set -e
+      export PATH=\$PATH:/root/.npm-global/bin
+      previous=\$(readlink -f $BASE/current || true)
+      ln -sfn $RELEASE $BASE/current
+      pm2 delete IdCardFrontend >/dev/null 2>&1 || true
+      pm2 start serve --name IdCardFrontend -- -s $BASE/current -l 5173
+      for i in \$(seq 1 15); do curl -fsS http://127.0.0.1:5173/ >/dev/null 2>&1 && ok=1 && break; sleep 2; done
+      if [ -z "\${ok:-}" ]; then
+        echo "Frontend did not start; restoring the previous build"
+        pm2 delete IdCardFrontend >/dev/null 2>&1 || true
+        if [ -n "\$previous" ] && [ -d "\$previous" ]; then ln -sfn \$previous $BASE/current; dir=$BASE/current; else dir=/mnt/vol1/Project/Frontend/dist/Matdash; fi
+        pm2 start serve --name IdCardFrontend -- -s \$dir -l 5173
+        pm2 save
+        exit 1
+      fi
+      pm2 save
+      ls -1dt $BASE/releases/* | tail -n +6 | xargs -r rm -rf
+      EOF
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"

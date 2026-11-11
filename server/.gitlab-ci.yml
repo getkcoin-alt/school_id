@@ -1,0 +1,48 @@
+# ID Card Studio API: test, then deploy to the production server (port 6001 behind idstudio.in/api).
+# CI/CD variables used: DEMO_TEST (server root password, as before).
+# Optional: DEPLOY_HOST, SUPER_ADMIN_EMAIL / SUPER_ADMIN_NAME (first super admin, emailed a setup link),
+#           NEW_DATABASE_URL (otherwise the database settings of the previous Java release are reused).
+stages:
+  - test
+  - deploy
+
+variables:
+  DEPLOY_HOST: "69.62.75.171"
+
+test:
+  stage: test
+  image: node:22-bookworm
+  services:
+    - name: postgres:16
+      alias: postgres
+  variables:
+    POSTGRES_USER: idstudio
+    POSTGRES_PASSWORD: idstudio
+    POSTGRES_DB: idstudio_test
+    TEST_DATABASE_URL: postgresql://idstudio:idstudio@postgres:5432/idstudio_test
+  script:
+    - npm ci --no-audit --no-fund
+    - npx prisma generate
+    - npm run typecheck
+    - npm test
+    - npm run build
+  artifacts:
+    paths:
+      - dist/
+    expire_in: 1 day
+
+deploy:
+  stage: deploy
+  image: debian:bookworm-slim
+  needs: [test]
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq openssh-client sshpass >/dev/null
+  script:
+    - export SSHPASS="$DEMO_TEST"
+    - SSH="sshpass -e ssh -o StrictHostKeyChecking=no root@$DEPLOY_HOST"
+    - RELEASE="/mnt/vol1/Project/Backend-v2/releases/$(date +%Y%m%d-%H%M%S)-$CI_COMMIT_SHORT_SHA"
+    - $SSH "mkdir -p $RELEASE"
+    - tar czf - dist prisma deploy package.json package-lock.json | $SSH "tar xzf - -C $RELEASE"
+    - $SSH "SUPER_ADMIN_EMAIL='${SUPER_ADMIN_EMAIL:-}' SUPER_ADMIN_NAME='${SUPER_ADMIN_NAME:-Super Admin}' NEW_DATABASE_URL='${NEW_DATABASE_URL:-}' bash $RELEASE/deploy/deploy.sh $RELEASE"
+  rules:
+    - if: $CI_COMMIT_BRANCH == "master"

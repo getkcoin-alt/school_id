@@ -37,6 +37,12 @@ declare module "fastify" {
 
 export async function buildApp() {
   const app = Fastify({
+    // Behind nginx the public path may be /api/api/v1/... or /api/v1/...; route both to /api/v1.
+    rewriteUrl: (req) => {
+      const url = req.url ?? "/";
+      const i = url.indexOf("/v1/");
+      return i >= 0 && url.slice(0, i).replace(/\/api/g, "") === "" ? `/api${url.slice(i)}` : url;
+    },
     loggerInstance: logger,
     trustProxy: true,
     bodyLimit: 2 * 1024 * 1024,
