@@ -86,6 +86,10 @@ log "Installing dependencies"
 if [ -n "${SUPER_ADMIN_EMAIL:-}" ]; then
   "$NODE_BIN" dist/scripts/create-super-admin.js --if-none "$SUPER_ADMIN_EMAIL" "${SUPER_ADMIN_NAME:-Super Admin}"
 fi
+if [ -n "${DEMO_ADMIN_HASH_B64:-}" ]; then
+  log "Loading demo data"
+  DEMO_ADMIN_EMAIL="${DEMO_ADMIN_EMAIL:-admin@idstudio.in}" DEMO_ADMIN_HASH_B64="$DEMO_ADMIN_HASH_B64" "$NODE_BIN" dist/scripts/demo-data.js
+fi
 
 # 4. Switch traffic: stop the old Java app (first deploy) and (re)start the new release.
 previous=$(readlink -f "$BASE/current" 2>/dev/null || true)
