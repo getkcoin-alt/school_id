@@ -480,6 +480,13 @@ export default function Students({ ctx }) {
     [status, setStatus] = useState(""),
     [tab, setTab] = useState("Active"),
     [page, setPage] = useState(1),
+    [perPage, setPerPageState] = useState(() => {
+      try {
+        return Number(localStorage.getItem("students.perPage")) || 8;
+      } catch {
+        return 8;
+      }
+    }),
     [selected, setSelected] = useState([]),
     [edit, setEdit] = useState(null),
     [importing, setImporting] = useState(false),
@@ -496,9 +503,17 @@ export default function Students({ ctx }) {
       (!section || s.section === section) &&
       (!status || s.status === status),
   );
-  const pages = Math.max(1, Math.ceil(filtered.length / 8));
+  const size = perPage === -1 ? Math.max(filtered.length, 1) : perPage;
+  const pages = Math.max(1, Math.ceil(filtered.length / size));
   const current = Math.min(page, pages);
-  const rows = filtered.slice((current - 1) * 8, current * 8);
+  const rows = filtered.slice((current - 1) * size, current * size);
+  const setPerPage = (n) => {
+    setPerPageState(n);
+    setPage(1);
+    try {
+      localStorage.setItem("students.perPage", String(n));
+    } catch {}
+  };
   const all = rows.length > 0 && rows.every((s) => selected.includes(s.id));
   const resetPage = (f) => {
     f();
@@ -810,10 +825,23 @@ export default function Students({ ctx }) {
           </div>
         )}
         <div className="pagination">
-          <span>
-            Showing {rows.length ? (current - 1) * 8 + 1 : 0}–
-            {Math.min(current * 8, filtered.length)} of {filtered.length}{" "}
-            students
+          <span className="pagination-info">
+            <label>
+              Rows per page
+              <select value={perPage} onChange={(e) => setPerPage(Number(e.target.value))}>
+                {[8, 25, 50, 100].map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+                <option value={-1}>All</option>
+              </select>
+            </label>
+            <span>
+              Showing {rows.length ? (current - 1) * size + 1 : 0}–
+              {Math.min(current * size, filtered.length)} of {filtered.length}{" "}
+              students
+            </span>
           </span>
           <div>
             <Button
