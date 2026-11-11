@@ -961,13 +961,13 @@ export function Staff({ ctx }) {
                       const f = e.target.files?.[0];
                       if (!f) return;
                       if (
-                        f.size > 2e6 ||
+                        f.size > 15 * 1024 * 1024 ||
                         !["image/jpeg", "image/png", "image/webp"].includes(
                           f.type,
                         )
                       ) {
                         notify(
-                          "Choose a JPG, PNG, or WebP image under 2 MB.",
+                          "Choose a JPG, PNG, or WebP image under 15 MB.",
                           "error",
                         );
                         return;

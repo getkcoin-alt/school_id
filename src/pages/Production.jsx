@@ -99,6 +99,8 @@ function PDFViewer({ file, onClose, notify }) {
     </Modal>
   );
 }
+const MAX_PHOTOS = 200,
+  MAX_PHOTO_MB = 15;
 export function PhotoUploads({ ctx }) {
   const { data, school, update, notify, log, availableSchools, role } = ctx;
   const [tab, setTab] = useState("PDF collections"),
@@ -107,6 +109,7 @@ export function PhotoUploads({ ctx }) {
     [note, setNote] = useState(""),
     [classNo, setClass] = useState(""),
     [busy, setBusy] = useState(false),
+    [progress, setProgress] = useState(""),
     [view, setView] = useState(null),
     [remove, setRemove] = useState(null);
   const uploads = data.uploads.filter((u) => u.school === school.id);
@@ -172,7 +175,69 @@ export function PhotoUploads({ ctx }) {
       setBusy(false);
     }
   };
+  // Live: files go straight to the server in batches (it resizes each photo for print
+  // and links it to the student whose photo number matches the file name).
+  const bulkLive = async (files) => {
+    const list = [...files];
+    if (list.length > MAX_PHOTOS) {
+      notify(`Choose up to ${MAX_PHOTOS} photos at a time.`, "error");
+      return;
+    }
+    const types = ["image/jpeg", "image/png", "image/webp"];
+    const wrongType = list.filter((f) => !types.includes(f.type));
+    const tooBig = list.filter((f) => types.includes(f.type) && f.size > MAX_PHOTO_MB * 1024 * 1024);
+    const seen = new Set();
+    const ok = list.filter((f) => {
+      if (!types.includes(f.type) || f.size > MAX_PHOTO_MB * 1024 * 1024) return false;
+      const k = f.name.toLowerCase();
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+    const repeated = list.length - wrongType.length - tooBig.length - ok.length;
+    const chunks = [];
+    for (const f of ok) {
+      const last = chunks[chunks.length - 1];
+      if (last && last.files.length < 10 && last.bytes + f.size <= 40 * 1024 * 1024) {
+        last.files.push(f);
+        last.bytes += f.size;
+      } else chunks.push({ files: [f], bytes: f.size });
+    }
+    setBusy(true);
+    const results = [];
+    let matched = 0,
+      done = 0;
+    try {
+      for (const c of chunks) {
+        setProgress(`Uploading ${done + 1}–${done + c.files.length} of ${ok.length}…`);
+        try {
+          const r = await ctx.api.upload("/media/photos", { schoolId: school.id, files: c.files });
+          results.push(...r.results);
+          matched += r.matched || 0;
+        } catch (e) {
+          results.push(...c.files.map((f) => ({ fileName: f.name, status: "failed", reason: e.message })));
+        }
+        done += c.files.length;
+      }
+    } finally {
+      setBusy(false);
+      setProgress("");
+    }
+    await ctx.reload().catch(() => {});
+    const saved = results.filter((r) => r.status === "saved").length,
+      replaced = results.filter((r) => r.status === "replaced").length,
+      failed = results.filter((r) => r.status === "failed");
+    const parts = [`${saved} photos added`];
+    if (replaced) parts.push(`${replaced} replaced (same file name)`);
+    if (matched) parts.push(`${matched} linked to students by photo number`);
+    if (tooBig.length) parts.push(`${tooBig.length} over ${MAX_PHOTO_MB} MB skipped`);
+    if (wrongType.length) parts.push(`${wrongType.length} not JPG/PNG/WebP skipped`);
+    if (repeated) parts.push(`${repeated} repeated in the selection skipped`);
+    if (failed.length) parts.push(`${failed.length} failed (${[...new Set(failed.map((f) => f.reason))].slice(0, 2).join("; ")})`);
+    notify(parts.join("; ") + ".", failed.length || saved + replaced === 0 ? "error" : undefined);
+  };
   const bulk = async (files) => {
+    if (ctx.live) return bulkLive(files);
     const list = [...files];
     if (list.length > 20) {
       notify("Choose up to 20 photos at a time.", "error");
@@ -457,15 +522,21 @@ export function PhotoUploads({ ctx }) {
             <div className="padded">
               <label className="dropzone">
                 <Icon name="image" size={30} />
-                <strong>Add individual photos</strong>
+                <strong>{progress || "Add individual photos"}</strong>
                 <span>
-                  JPG, PNG, WebP · up to 500 KB each · 20 files at a time
+                  {ctx.live
+                    ? `JPG, PNG, WebP · up to ${MAX_PHOTO_MB} MB each · ${MAX_PHOTOS} files at a time · name files by photo number to link them to students`
+                    : "JPG, PNG, WebP · up to 500 KB each · 20 files at a time"}
                 </span>
                 <input
                   type="file"
                   multiple
+                  disabled={busy}
                   accept="image/png,image/jpeg,image/webp"
-                  onChange={(e) => bulk(e.target.files || [])}
+                  onChange={(e) => {
+                    bulk(e.target.files || []);
+                    e.target.value = "";
+                  }}
                 />
               </label>
               <div className="photo-library">

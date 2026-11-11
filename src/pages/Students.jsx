@@ -115,9 +115,9 @@ export function StudentEditor({ ctx, student, onClose, onSaved }) {
     if (!file) return;
     if (
       !["image/jpeg", "image/png", "image/webp"].includes(file.type) ||
-      file.size > 2 * 1024 * 1024
+      file.size > 15 * 1024 * 1024
     ) {
-      notify("Choose a JPG, PNG, or WebP image under 2 MB.", "error");
+      notify("Choose a JPG, PNG, or WebP image under 15 MB.", "error");
       return;
     }
     const reader = new FileReader();
@@ -154,7 +154,7 @@ export function StudentEditor({ ctx, student, onClose, onSaved }) {
                 onChange={photo}
               />
             </label>
-            <p>JPG, PNG, WebP · max. 2 MB · manual upload</p>
+            <p>JPG, PNG, WebP · max. 15 MB · manual upload</p>
           </div>
           {data.photoLibrary.filter((p) => p.school === school.id).length >
             0 && (
