@@ -73,6 +73,18 @@ MAIL_FROM="ID Card Studio <${smtp_user:-no-reply@idstudio.in}>"
 MAX_UPLOAD_MB="50"
 ENV
 fi
+# Mail settings can be replaced from GitLab CI/CD variables (e.g. a new Gmail app password).
+if [ -n "${SMTP_USER_NEW:-}" ] && [ -n "${SMTP_PASS_NEW:-}" ]; then
+  log "Updating mail settings"
+  "$NODE_BIN" -e '
+    const fs = require("fs"); const [file, user, pass, host, port] = process.argv.slice(1);
+    const set = { MAIL_DRIVER: "smtp", SMTP_USER: user, SMTP_PASS: pass, SMTP_HOST: host || "smtp.gmail.com", SMTP_PORT: port || "587", MAIL_FROM: `ID Card Studio <${user}>` };
+    let lines = fs.readFileSync(file, "utf8").split("\n").filter((l) => !Object.keys(set).some((k) => l.startsWith(k + "=")));
+    while (lines.length && lines[lines.length - 1] === "") lines.pop();
+    for (const [k, v] of Object.entries(set)) lines.push(`${k}=${JSON.stringify(v)}`);
+    fs.writeFileSync(file, lines.join("\n") + "\n", { mode: 0o600 });
+  ' "$ENV_FILE" "$SMTP_USER_NEW" "$(echo "$SMTP_PASS_NEW" | tr -d ' ')" "${SMTP_HOST_NEW:-}" "${SMTP_PORT_NEW:-}"
+fi
 set -a; . "$ENV_FILE"; set +a
 
 # 3. Install, prepare the database.

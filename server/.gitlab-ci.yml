@@ -2,7 +2,8 @@
 # CI/CD variables used: DEMO_TEST (server root password, as before).
 # Optional: DEPLOY_HOST, SUPER_ADMIN_EMAIL / SUPER_ADMIN_NAME (first super admin, emailed a setup link),
 #           NEW_DATABASE_URL (otherwise the database settings of the previous Java release are reused),
-#           DEMO_ADMIN_HASH_B64 / DEMO_ADMIN_EMAIL (run once to load demo data and set the super admin password hash).
+#           DEMO_ADMIN_HASH_B64 / DEMO_ADMIN_EMAIL (run once to load demo data and set the super admin password hash),
+#           SMTP_USER / SMTP_PASS (masked; Gmail app password) and optional SMTP_HOST / SMTP_PORT to replace the mail login.
 stages:
   - test
   - deploy
@@ -44,6 +45,6 @@ deploy:
     - RELEASE="/mnt/vol1/Project/Backend-v2/releases/$(date +%Y%m%d-%H%M%S)-$CI_COMMIT_SHORT_SHA"
     - $SSH "mkdir -p $RELEASE"
     - tar czf - dist prisma deploy package.json | $SSH "tar xzf - -C $RELEASE"
-    - $SSH "SUPER_ADMIN_EMAIL='${SUPER_ADMIN_EMAIL:-}' SUPER_ADMIN_NAME='${SUPER_ADMIN_NAME:-Super Admin}' NEW_DATABASE_URL='${NEW_DATABASE_URL:-}' DEMO_ADMIN_EMAIL='${DEMO_ADMIN_EMAIL:-}' DEMO_ADMIN_HASH_B64='${DEMO_ADMIN_HASH_B64:-}' bash $RELEASE/deploy/deploy.sh $RELEASE"
+    - $SSH "SUPER_ADMIN_EMAIL='${SUPER_ADMIN_EMAIL:-}' SUPER_ADMIN_NAME='${SUPER_ADMIN_NAME:-Super Admin}' NEW_DATABASE_URL='${NEW_DATABASE_URL:-}' DEMO_ADMIN_EMAIL='${DEMO_ADMIN_EMAIL:-}' DEMO_ADMIN_HASH_B64='${DEMO_ADMIN_HASH_B64:-}' SMTP_USER_NEW='${SMTP_USER:-}' SMTP_PASS_NEW='${SMTP_PASS:-}' SMTP_HOST_NEW='${SMTP_HOST:-}' SMTP_PORT_NEW='${SMTP_PORT:-}' bash $RELEASE/deploy/deploy.sh $RELEASE"
   rules:
     - if: $CI_COMMIT_BRANCH == "master"
