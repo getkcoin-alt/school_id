@@ -32,6 +32,11 @@ function PDFViewer({ file, onClose, notify }) {
       objectURL;
     async function run() {
       try {
+        // Live: the PDF is served by the API (signed link, same site).
+        if (file.url) {
+          if (alive) setURL(file.url);
+          return;
+        }
         let blob = file.fileKey ? await getFile(file.fileKey) : null;
         if (!blob) {
           if (file.fileKey)
@@ -75,7 +80,7 @@ function PDFViewer({ file, onClose, notify }) {
     <Modal
       wide
       title={file.name}
-      subtitle={`${file.pages} pages · School photo collection · browser-local file`}
+      subtitle={`${file.pages} pages · School photo collection${file.url ? "" : " · browser-local file"}`}
       onClose={onClose}
     >
       <div className="pdf-preview">
@@ -137,6 +142,15 @@ export function PhotoUploads({ ctx }) {
       );
       if (signature !== "%PDF-")
         throw Error("This file is not a valid PDF document.");
+      if (ctx.live) {
+        const fullNote = [classNo && `Class ${classNo}`, note.trim()].filter(Boolean).join(" · ");
+        await ctx.api.upload("/media/pdfs", { schoolId: school.id, pages: String(+pages), note: fullNote || undefined, files: [file] });
+        await ctx.reload().catch(() => {});
+        setFile(null);
+        setNote("");
+        notify(`Photo PDF saved for ${school.name}. The school and ID Studio can now see it.`);
+        return;
+      }
       const id = uid("PDF");
       await putFile(id, file);
       update((d) =>
