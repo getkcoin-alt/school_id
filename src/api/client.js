@@ -85,8 +85,10 @@ export const api = {
     const form = new FormData();
     for (const [k, v] of Object.entries(fields)) {
       if (v === undefined || v === null) continue;
-      if (Array.isArray(v)) v.forEach((x) => form.append(k, x, x.name));
-      else form.append(k, v, v instanceof Blob ? v.name || "file" : undefined);
+      // A filename may only be passed with a Blob; text fields take two arguments.
+      const add = (x) => (x instanceof Blob ? form.append(k, x, x.name || "file") : form.append(k, String(x)));
+      if (Array.isArray(v)) v.forEach(add);
+      else add(v);
     }
     return request(p, { method: "POST", form });
   },
