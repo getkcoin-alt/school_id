@@ -29,7 +29,8 @@ const user = await prisma.user.upsert({
 });
 if (!password) {
   const url = await sendOnboardingInvite(user);
-  console.log(`Setup link emailed to ${email}. Link: ${url}`);
+  // Deploy logs are visible to project members, so the one-time link is only printed when run by hand.
+  console.log(process.argv.includes("--if-none") ? `Setup link emailed to ${email}.` : `Setup link emailed to ${email}. Link: ${url}`);
 } else console.log(`Super admin ${email} is ready.`);
 await new Promise((r) => setTimeout(r, 500));
 await prisma.$disconnect();

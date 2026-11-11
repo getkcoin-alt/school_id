@@ -79,7 +79,7 @@ set -a; . "$ENV_FILE"; set +a
 cd "$RELEASE"
 ln -sfn "$ENV_FILE" .env
 log "Installing dependencies"
-"$NODE_DIR/bin/npm" ci --omit=dev --no-audit --no-fund
+"$NODE_DIR/bin/npm" install --omit=dev --no-audit --no-fund --no-package-lock
 "$NODE_DIR/bin/npx" prisma generate
 "$NODE_BIN" dist/scripts/ensure-database.js
 "$NODE_DIR/bin/npx" prisma migrate deploy

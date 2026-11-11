@@ -21,7 +21,7 @@ test:
     POSTGRES_DB: idstudio_test
     TEST_DATABASE_URL: postgresql://idstudio:idstudio@postgres:5432/idstudio_test
   script:
-    - npm ci --no-audit --no-fund
+    - npm install --no-audit --no-fund
     - npx prisma generate
     - npm run typecheck
     - npm test
@@ -42,7 +42,7 @@ deploy:
     - SSH="sshpass -e ssh -o StrictHostKeyChecking=no root@$DEPLOY_HOST"
     - RELEASE="/mnt/vol1/Project/Backend-v2/releases/$(date +%Y%m%d-%H%M%S)-$CI_COMMIT_SHORT_SHA"
     - $SSH "mkdir -p $RELEASE"
-    - tar czf - dist prisma deploy package.json package-lock.json | $SSH "tar xzf - -C $RELEASE"
+    - tar czf - dist prisma deploy package.json | $SSH "tar xzf - -C $RELEASE"
     - $SSH "SUPER_ADMIN_EMAIL='${SUPER_ADMIN_EMAIL:-}' SUPER_ADMIN_NAME='${SUPER_ADMIN_NAME:-Super Admin}' NEW_DATABASE_URL='${NEW_DATABASE_URL:-}' bash $RELEASE/deploy/deploy.sh $RELEASE"
   rules:
     - if: $CI_COMMIT_BRANCH == "master"
