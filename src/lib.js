@@ -50,7 +50,7 @@ export function csvText(rows, columns) {
     return '"' + s.replaceAll('"', '""') + '"';
   };
   return (
-    "\uFEFF" +
+    "\u{FEFF}" +
     [
       columns.map((c) => safe(c.label)).join(","),
       ...rows.map((row) => columns.map((c) => safe(row[c.key])).join(",")),
