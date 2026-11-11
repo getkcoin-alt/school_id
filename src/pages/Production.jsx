@@ -319,6 +319,19 @@ export function PhotoUploads({ ctx }) {
       {tab === "PDF collections" ? (
         <>
           <div className="upload-grid">
+            {role === "school" && ctx.live ? (
+              <Panel
+                title="Photo PDFs from your agent"
+                subtitle="Your agent or ID Studio uploads these. Open each one, check it, then mark it reviewed."
+              >
+                <div className="padded">
+                  <Callout icon="help">
+                    Photo PDFs are uploaded by your agent or ID Studio. They
+                    appear in the list below for you to check.
+                  </Callout>
+                </div>
+              </Panel>
+            ) : (
             <Panel
               title="Upload a photo PDF"
               subtitle="Keep one school’s photos together in a document."
@@ -398,6 +411,7 @@ export function PhotoUploads({ ctx }) {
                 </div>
               </div>
             </Panel>
+            )}
             <div className="upload-guide">
               <span className="eyebrow">A BETTER HANDOFF</span>
               <h2>
@@ -429,10 +443,19 @@ export function PhotoUploads({ ctx }) {
                   </div>
                 </div>
               ))}
-              <Callout icon="help">
-                PDFs are stored in this browser only. Extraction, automatic
-                photo matching, and server uploads are not connected.
-              </Callout>
+              {ctx.live ? (
+                <Callout icon="help">
+                  The PDF is saved for this school and ID Studio is notified.
+                  It is a reference copy: photos inside it are not extracted
+                  or matched to students automatically. To put photos on
+                  cards, use the Photo library tab or each student's record.
+                </Callout>
+              ) : (
+                <Callout icon="help">
+                  PDFs are stored in this browser only. Extraction, automatic
+                  photo matching, and server uploads are not connected.
+                </Callout>
+              )}
             </div>
           </div>
           <Panel
@@ -467,7 +490,9 @@ export function PhotoUploads({ ctx }) {
                       <td>{u.pages}</td>
                       <td>{fmtDate(u.date)}</td>
                       <td>
-                        <Badge>{u.status}</Badge>
+                        <Badge tone={u.status === "Reviewed" ? "green" : u.status === "Rejected" ? "red" : undefined}>
+                          {u.status}
+                        </Badge>
                       </td>
                       <td>
                         <div className="row-actions">
@@ -476,23 +501,26 @@ export function PhotoUploads({ ctx }) {
                             label={"Preview " + u.name}
                             onClick={() => setView(u)}
                           />
-                          <IconButton
-                            icon="check"
-                            label={"Mark reviewed " + u.name}
-                            onClick={() => {
-                              update((d) => ({
-                                ...d,
-                                uploads: d.uploads.map((x) =>
-                                  x.id === u.id
-                                    ? { ...x, status: "Approved" }
-                                    : x,
-                                ),
-                              }));
-                              notify(
-                                "Photo collection marked reviewed. Student cards still need individual approval.",
-                              );
-                            }}
-                          />
+                          {["school", "super"].includes(role) &&
+                            u.status !== "Reviewed" && (
+                              <IconButton
+                                icon="check"
+                                label={"Mark reviewed " + u.name}
+                                onClick={() => {
+                                  update((d) => ({
+                                    ...d,
+                                    uploads: d.uploads.map((x) =>
+                                      x.id === u.id
+                                        ? { ...x, status: "Reviewed" }
+                                        : x,
+                                    ),
+                                  }));
+                                  notify(
+                                    "Photo collection marked reviewed. Student cards still need individual approval.",
+                                  );
+                                }}
+                              />
+                            )}
                           <IconButton
                             icon="trash"
                             label={"Delete " + u.name}
