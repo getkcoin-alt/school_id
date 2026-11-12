@@ -120,7 +120,8 @@ export default function Root() {
   const invite = params.get("invite");
   const start = async () => {
     try {
-      setInitialData(await loadWorkspace(params.get("school")));
+      const school = new URLSearchParams(window.location.search).get("school");
+      setInitialData(await loadWorkspace(school));
       setState("ready");
     } catch {
       setState("login");
@@ -130,6 +131,9 @@ export default function Root() {
     if (!apiMode || invite || onboard) return;
     auth.restore().then((ok) => (ok ? start() : setState("login")));
     return onAuthChange(() => {
+      // Switching account (open account / return to super admin / sign in):
+      // start on that account's own overview, not the page the last one was on.
+      window.history.replaceState({}, "", "/");
       if (!auth.isSignedIn()) setState("login");
       else start();
     });
