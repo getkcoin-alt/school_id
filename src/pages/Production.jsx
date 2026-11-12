@@ -134,7 +134,12 @@ export function PhotoUploads({ ctx }) {
     [note, setNote] = useState(""),
     [classNo, setClass] = useState(""),
     [busy, setBusy] = useState(false),
-    [view, setView] = useState(null),
+    [view, setView] = useState(
+      () =>
+        data.uploads.find(
+          (file) => file.school === school.id && file.id === ctx.photoRecord,
+        ) || null,
+    ),
     [remove, setRemove] = useState(null);
   const canUploadPDF = ["regular", "premium", "super"].includes(role);
   const canReviewPDF = ["school", "super"].includes(role);
@@ -169,6 +174,18 @@ export function PhotoUploads({ ctx }) {
         log(
           {
             ...d,
+            notifications: [
+              {
+                id: uid("NOTICE"),
+                page: "photos",
+                school: school.id,
+                pdf: id,
+                title: "Photo PDF received",
+                text: `${file.name} · ${pages} ${Number(pages) === 1 ? "page" : "pages"}`,
+                read: false,
+              },
+              ...d.notifications,
+            ],
             uploads: [
               {
                 id,

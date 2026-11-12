@@ -459,7 +459,7 @@ export function ReviewQueue({ ctx }) {
       return isNotSubmitted(record) ? "Not submitted" : record.status;
     }),
     [query, setQuery] = useState(""),
-    [chosen, setChosen] = useState(ctx.phoneView ? ctx.reviewRecord : null),
+    [chosen, setChosen] = useState(ctx.reviewRecord),
     [reason, setReason] = useState(""),
     [edit, setEdit] = useState(null),
     [rejection, setRejection] = useState(false);

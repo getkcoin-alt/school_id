@@ -727,9 +727,6 @@ a:focus-visible {
   z-index: -1;
   cursor: default;
 }
-.notifications-wrap {
-  position: relative;
-}
 .notification-button {
   position: relative;
 }
@@ -742,56 +739,6 @@ a:focus-visible {
   background: var(--coral);
   border: 1px solid #fff;
   border-radius: 100%;
-}
-.notification-menu {
-  position: absolute;
-  right: -45px;
-  top: 42px;
-  width: 330px;
-  border: 1px solid #eee;
-  border-radius: 10px;
-  background: #fff;
-  box-shadow: 0 12px 40px #1c25391a;
-  padding: 9px;
-}
-.notification-menu > div {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px;
-  border-bottom: 1px solid var(--border);
-}
-.notification-menu > div > button {
-  font-size: 9px;
-  color: var(--coral);
-}
-.notification-menu > button {
-  display: flex;
-  gap: 9px;
-  padding: 14px 8px;
-  width: 100%;
-  text-align: left;
-}
-.notification-menu > button > span {
-  width: 5px;
-  height: 5px;
-  border-radius: 100%;
-  background: var(--coral);
-  margin-top: 5px;
-  flex-shrink: 0;
-}
-.notification-menu > button > .read {
-  background: #ddd;
-}
-.notification-menu strong {
-  font-size: 10px;
-  display: block;
-}
-.notification-menu small {
-  font-size: 9px;
-  display: block;
-  color: #999;
-  margin-top: 5px;
 }
 .main-shell main {
   padding: 0 32px;
@@ -1771,66 +1718,112 @@ th:last-child {
   max-width: 330px;
   margin: auto auto 16px;
 }
+:root:has(.modal-overlay[open]) {
+  overflow: hidden;
+}
+#root:has(.modal-overlay[open]) .toast {
+  display: none;
+}
 .modal-overlay {
   position: fixed;
-  inset: 0;
-  background: #17212d65;
-  backdrop-filter: blur(4px);
-  z-index: 200;
-  display: flex;
+  inset: var(--dialog-viewport-top, 0px) auto auto
+    var(--dialog-viewport-left, 0px);
+  margin: 0;
+  width: var(--dialog-viewport-width, 100%);
+  height: var(--dialog-viewport-height, 100dvh);
+  max-width: none;
+  max-height: none;
+  border: 0;
+  background: #17212d55;
+  color: var(--ink);
+  overflow: hidden;
   align-items: center;
   justify-content: center;
   padding: 24px;
 }
+.modal-overlay[open] {
+  display: flex;
+}
+.modal-overlay::backdrop {
+  background: transparent;
+}
 .modal {
   width: 560px;
   max-width: 100%;
-  max-height: 90dvh;
+  max-height: 100%;
   background: #fff;
   border-radius: 13px;
-  box-shadow: 0 25px 100px #17212d33;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
+  box-shadow: 0 16px 45px #17212d26;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scroll-padding-top: 76px;
   animation: modal-in 0.18s ease;
 }
 .modal.wide {
   width: 880px;
 }
+.modal-bar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #fff;
+}
 .modal-head {
-  padding: 24px 25px 20px;
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  gap: 15px;
-  flex-shrink: 0;
+  gap: 12px;
+  padding: 18px 25px;
   border-bottom: 1px solid var(--border);
+  background: #fff;
 }
 .modal-head h2 {
   font-size: 19px;
   letter-spacing: -0.5px;
+  overflow-wrap: anywhere;
 }
 .modal-head p {
-  font-size: 11px;
-  color: #9ba2ad;
-  line-height: 1.7;
-  margin-top: 7px;
+  font-size: 12px;
+  color: #616b7b;
+  line-height: 1.5;
+  margin-top: 5px;
   max-width: 650px;
+  overflow-wrap: anywhere;
+}
+.modal-head .icon-btn {
+  flex: none;
 }
 .modal-body {
   padding: 24px 25px;
-  overflow: auto;
-  min-height: 0;
-  flex: 1;
 }
-.modal > .modal-body {
-  min-height: 0;
-}
-.modal > form {
+.modal-feedback {
   display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  min-height: 0;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 14px 0;
+  padding: 5px 8px 5px 12px;
+  border-radius: 9px;
+  background: #e9f5ee;
+  color: #21533d;
+  font-size: 13px;
+}
+.modal-feedback.error {
+  background: #ffefee;
+  color: #922f37;
+}
+.modal-feedback > span {
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+.modal-feedback > svg,
+.modal-feedback .icon-btn {
+  flex: none;
+  color: inherit;
+}
+@media (prefers-reduced-motion: reduce) {
+  .modal {
+    animation: none;
+  }
 }
 .modal-actions {
   padding: 17px 25px;
@@ -3078,7 +3071,7 @@ input[role="switch"]:disabled {
   width: 20px;
 }
 .pdf-preview {
-  height: 65vh;
+  height: min(620px, 65dvh);
   background: #e7e9ed;
   display: flex;
   justify-content: center;
@@ -5203,7 +5196,6 @@ input[role="switch"]:disabled {
     padding: 15px;
   }
   .modal {
-    max-height: 94dvh;
     border-radius: 10px;
   }
   .modal-head {
@@ -5404,10 +5396,6 @@ input[role="switch"]:disabled {
   }
   .role-menu footer {
     font-size: 10px;
-  }
-  .notification-menu {
-    right: -5px;
-    width: 300px;
   }
   .page-title h1 {
     font-size: 24px;
@@ -5751,7 +5739,6 @@ input[role="switch"]:disabled {
     padding: 10px;
   }
   .modal {
-    max-height: 95dvh;
   }
   .modal-body {
     padding: 20px;
@@ -6099,9 +6086,6 @@ input[role="switch"]:disabled {
   .student-footer {
     font-size: 7px;
     line-height: 1.8;
-  }
-  .notification-menu {
-    right: -3px;
   }
   .toast {
     font-size: 11px;

@@ -193,6 +193,9 @@ export default function StudentPortal({ ctx }) {
           notifications: [
             {
               id: Date.now(),
+              page: "review",
+              school: school.id,
+              student: original.id,
               title: `${draft.name} submitted ID details`,
               text: `${school.name} · Ready for school review`,
               read: false,

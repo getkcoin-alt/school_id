@@ -680,33 +680,44 @@
 }
 .phone-workspace .modal-overlay,
 .student-app .modal-overlay {
-  align-items: flex-end;
-  padding: 0;
-  background: #17212d80;
+  padding: max(8px, env(safe-area-inset-top, 0px))
+    max(10px, env(safe-area-inset-right, 0px))
+    max(8px, env(safe-area-inset-bottom, 0px))
+    max(10px, env(safe-area-inset-left, 0px));
+  background: linear-gradient(#17212d4d, #17212d4d) center /
+    min(100%, var(--phone-width)) 100% no-repeat;
+}
+.phone-workspace .modal-overlay--top,
+.student-app .modal-overlay--top {
+  align-items: flex-start;
+  padding-top: calc(
+    clamp(8px, var(--dialog-viewport-height, 100dvh) - 290px, 76px) +
+      env(safe-area-inset-top, 0px)
+  );
 }
 .phone-workspace .modal,
 .student-app .modal {
-  width: min(100%, var(--phone-width));
-  max-height: min(92dvh, 850px);
-  border-radius: 22px 22px 0 0;
+  width: min(100%, calc(var(--phone-width) - 20px));
+  border-radius: 16px;
 }
 .phone-workspace .modal-head,
 .student-app .modal-head {
   align-items: center;
-  padding: 10px 14px;
+  padding: 7px 14px;
+}
+.phone-workspace .modal-head .icon-btn,
+.student-app .modal-head .icon-btn {
+  width: 44px;
+  height: 44px;
 }
 .phone-workspace .modal-body,
 .student-app .modal-body {
   padding: 14px;
-  overscroll-behavior: contain;
-}
-.phone-workspace .modal-body:last-child {
-  padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px));
 }
 .phone-workspace .modal-actions,
 .student-app .modal-actions {
   flex-wrap: wrap;
-  padding: 8px 14px calc(10px + env(safe-area-inset-bottom, 0px));
+  padding: 10px 14px 12px;
 }
 .phone-workspace .form-grid,
 .student-app .form-grid {
@@ -745,6 +756,29 @@
   border-radius: 10px;
   background: var(--phone-accent-soft);
   color: var(--phone-accent);
+}
+.notification-list {
+  --phone-ink: #242936;
+  --phone-muted: #616b7b;
+  --phone-border: #e3e6ed;
+}
+.notification-list > .btn {
+  min-height: 44px;
+  margin-bottom: 4px;
+  color: #b9323b;
+}
+.notification-list .notification-indicator {
+  flex: 0 0 9px;
+  height: 9px;
+  border: 1px solid #98a0af;
+  border-radius: 50%;
+}
+.notification-indicator[data-unread] {
+  border-color: #b9323b;
+  background: #b9323b;
+}
+.phone-menu-row:hover {
+  background: #f5f6f9;
 }
 .phone-session {
   display: flex;

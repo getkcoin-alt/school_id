@@ -449,7 +449,11 @@ export default function Students({ ctx }) {
     [selected, setSelected] = useState([]),
     [edit, setEdit] = useState(null),
     [importing, setImporting] = useState(false),
-    [view, setView] = useState(null),
+    [view, setView] = useState(
+      () =>
+        schoolStudents.find((student) => student.id === ctx.studentRecord) ||
+        null,
+    ),
     [remove, setRemove] = useState(null);
   const filtered = schoolStudents.filter(
     (s) =>

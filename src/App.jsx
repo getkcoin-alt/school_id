@@ -9,6 +9,8 @@ import {
   Modal,
   Badge,
   Empty,
+  Feedback,
+  FeedbackContext,
 } from "./components.jsx";
 import Dashboard from "./pages/Dashboard.jsx";
 import Students from "./pages/Students.jsx";
@@ -127,7 +129,8 @@ export default function App() {
   );
   const [requestedAgent, setRequestedAgent] = useState(initial.get("agent"));
   const [schoolId, setSchoolId] = useState(initial.get("school") || "SCH-001");
-  const [reviewRecord, setReviewRecord] = useState(initial.get("record"));
+  const [screenRecord, setScreenRecord] = useState(initial.get("record"));
+  const [recordVisit, setRecordVisit] = useState(0);
   const [session, setSession] = useState("2026–27");
   const [toast, setToast] = useState(null),
     [openRoles, setOpenRoles] = useState(false),
@@ -181,20 +184,18 @@ export default function App() {
     if (role !== "student") {
       u.searchParams.set("page", page);
       u.searchParams.set("school", schoolId);
-      if (page === "review" && reviewRecord)
-        u.searchParams.set("record", reviewRecord);
+      if (["review", "students", "photos"].includes(page) && screenRecord)
+        u.searchParams.set("record", screenRecord);
       else u.searchParams.delete("record");
       u.searchParams.delete("student");
       u.searchParams.delete("token");
     }
     window.history.replaceState({}, "", u);
-  }, [role, page, schoolId, reviewRecord, requestedAgent]);
+  }, [role, page, schoolId, screenRecord, requestedAgent]);
   useEffect(() => {
     const listener = (e) => {
       if (e.key === "Escape") {
         setOpenRoles(false);
-        setNotifications(false);
-        setSearchOpen(false);
       }
     };
     window.addEventListener("keydown", listener);
@@ -219,10 +220,12 @@ export default function App() {
   const school = availableSchools.find((s) => s.id === schoolId) ||
     availableSchools[0] || { id: "", name: "No school assigned" };
   const go = (target, record = null) => {
-    if (phoneView && target !== page)
+    if (phoneView && (target !== page || record !== screenRecord))
       window.history.pushState({}, "", window.location.href);
     setPage(target);
-    setReviewRecord(record);
+    setScreenRecord(record);
+    if (["review", "photos"].includes(target) || record)
+      setRecordVisit((visit) => visit + 1);
     window.scrollTo({ top: 0, behavior: "instant" });
   };
   const switchRole = (id) => {
@@ -231,7 +234,7 @@ export default function App() {
     setRole(id);
     setRequestedAgent(null);
     setPage("overview");
-    setReviewRecord(null);
+    setScreenRecord(null);
     setOpenRoles(false);
     setSchoolId(id === "regular" ? "SCH-003" : "SCH-001");
     if (id === "student") {
@@ -250,7 +253,7 @@ export default function App() {
       setPage(pageNames[screen] ? screen : "overview");
       setRequestedAgent(params.get("agent"));
       setSchoolId(params.get("school") || "SCH-001");
-      setReviewRecord(params.get("record"));
+      setScreenRecord(params.get("record"));
       setOpenRoles(false);
       setNotifications(false);
       setSearchOpen(false);
@@ -305,7 +308,9 @@ export default function App() {
     profileKey,
     agentId: agent?.id,
     phoneView,
-    reviewRecord,
+    reviewRecord: page === "review" ? screenRecord : null,
+    studentRecord: page === "students" ? screenRecord : null,
+    photoRecord: page === "photos" ? screenRecord : null,
     design: data.schoolDesigns?.[school.id] || data.design,
     schoolStudents: data.students.filter(
       (s) => s.school === school.id && s.session === session,
@@ -315,14 +320,70 @@ export default function App() {
   const reviewCount = ctx.schoolStudents.filter(
     (s) => s.status === "In review",
   ).length;
-  const unread = data.notifications.filter((n) => !n.read).length;
+  const alerts = data.notifications.flatMap((item) => {
+    const legacySchool = data.schools.find((entry) =>
+      item.text?.startsWith(`${entry.name} ·`),
+    );
+    const alertSchool =
+      item.school ||
+      legacySchool?.id ||
+      ([1, 2].includes(item.id) ? "SCH-001" : school.id);
+    const student = item.student
+      ? data.students.find((record) => record.id === item.student)
+      : legacySchool &&
+        data.students.find(
+          (record) =>
+            record.school === alertSchool &&
+            item.title === `${record.name} submitted ID details`,
+        );
+    const target =
+      item.page || (item.title === "Photo PDF received" ? "photos" : "review");
+    const canOpen = (menuItems[role] || []).some(([, ...items]) =>
+      items.some(([key]) => key === target),
+    );
+    const inScope =
+      role === "school"
+        ? alertSchool === school.id
+        : availableSchools.some((entry) => entry.id === alertSchool);
+    return canOpen && inScope
+      ? [{ ...item, target, alertSchool, student }]
+      : [];
+  });
+  const hasUnread = alerts.some((item) => !item.read);
+  const markRead = (ids) => {
+    update((d) => ({
+      ...d,
+      notifications: d.notifications.map((item) =>
+        ids.includes(item.id) && !item.read ? { ...item, read: true } : item,
+      ),
+    }));
+  };
+  const openAlert = (item) => {
+    markRead([item.id]);
+    setSchoolId(item.alertSchool);
+    if (item.student) setSession(item.student.session);
+    if (item.student?.status === "Submitted for print") go("printing");
+    else {
+      const pdf =
+        item.target === "photos" &&
+        data.uploads.find(
+          (file) =>
+            file.school === item.alertSchool &&
+            (item.pdf
+              ? file.id === item.pdf
+              : item.text?.startsWith(`${file.name} ·`)),
+        );
+      go(item.target, item.student?.id || pdf?.id || null);
+    }
+    setNotifications(false);
+  };
   const roleControl = (
     <div className="role-switcher">
       <button
         className="role-trigger"
         onClick={() => setOpenRoles(!openRoles)}
         aria-expanded={openRoles}
-        aria-haspopup="menu"
+        aria-haspopup={phoneView ? "dialog" : "menu"}
       >
         <span className="role-icon">
           <Icon name={selectedRole.icon} size={17} />
@@ -333,7 +394,7 @@ export default function App() {
         </span>
         <Icon name="down" size={15} />
       </button>
-      {openRoles && (
+      {openRoles && !phoneView && (
         <>
           <button
             className="popover-dismiss"
@@ -370,13 +431,23 @@ export default function App() {
   let content;
   switch (page) {
     case "students":
-      content = <Students ctx={ctx} />;
+      content = (
+        <Students
+          key={`${screenRecord || "students"}-${recordVisit}`}
+          ctx={ctx}
+        />
+      );
       break;
     case "invitations":
       content = <Invitations ctx={ctx} />;
       break;
     case "review":
-      content = <ReviewQueue key={reviewRecord || "review"} ctx={ctx} />;
+      content = (
+        <ReviewQueue
+          key={`${screenRecord || "review"}-${recordVisit}`}
+          ctx={ctx}
+        />
+      );
       break;
     case "schools":
       content = <Schools ctx={ctx} />;
@@ -408,7 +479,12 @@ export default function App() {
       content = <Activity ctx={ctx} />;
       break;
     case "photos":
-      content = <PhotoUploads key={school.id} ctx={ctx} />;
+      content = (
+        <PhotoUploads
+          key={`${school.id}-${screenRecord || "photos"}-${recordVisit}`}
+          ctx={ctx}
+        />
+      );
       break;
     case "designs":
       content = <Designs ctx={ctx} />;
@@ -446,7 +522,7 @@ export default function App() {
         )
         .slice(0, 5)
     : [];
-  return (
+  const workspace = (
     <div
       className={
         role === "student"
@@ -479,8 +555,10 @@ export default function App() {
           pageNames={pageNames}
           groups={menuItems[role] || menuItems.school}
           selectedRole={selectedRole}
-          switchRole={switchRole}
+          onRoles={() => setOpenRoles(true)}
           onSearch={() => setSearchOpen(true)}
+          onNotifications={() => setNotifications(true)}
+          hasUnread={hasUnread}
           reviewCount={reviewCount}
         >
           {content}
@@ -599,51 +677,15 @@ export default function App() {
                 >
                   <Icon name="search" />
                 </button>
-                <div className="notifications-wrap">
-                  <button
-                    className="icon-btn notification-button"
-                    aria-label="Notifications"
-                    onClick={() => setNotifications(!notifications)}
-                  >
-                    <Icon name="bell" />
-                    {unread > 0 && <i />}
-                  </button>
-                  {notifications && (
-                    <div className="notification-menu">
-                      <div>
-                        <strong>Notifications</strong>
-                        <button
-                          onClick={() =>
-                            update((d) => ({
-                              ...d,
-                              notifications: d.notifications.map((n) => ({
-                                ...n,
-                                read: true,
-                              })),
-                            }))
-                          }
-                        >
-                          Mark all read
-                        </button>
-                      </div>
-                      {data.notifications.map((n) => (
-                        <button
-                          key={n.id}
-                          onClick={() => {
-                            go(n.title.includes("PDF") ? "photos" : "review");
-                            setNotifications(false);
-                          }}
-                        >
-                          <span className={n.read ? "read" : ""} />
-                          <div>
-                            <strong>{n.title}</strong>
-                            <small>{n.text}</small>
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                <button
+                  className="icon-btn notification-button"
+                  aria-label="Notifications"
+                  aria-haspopup="dialog"
+                  onClick={() => setNotifications(true)}
+                >
+                  <Icon name="bell" />
+                  {hasUnread && <i aria-hidden="true" />}
+                </button>
                 <Avatar name={userProfile.name} size={34} />
               </div>
             </header>
@@ -680,23 +722,74 @@ export default function App() {
           </div>
         </>
       )}
-      {toast && (
-        <div role="status" className={`toast ${toast.tone}`}>
-          <Icon
-            name={toast.tone === "error" ? "alert" : "checkCircle"}
-            size={20}
-          />
-          <span>{toast.message}</span>
-          <IconButton
-            icon="x"
-            label="Dismiss notification"
-            onClick={() => setToast(null)}
-          />
-        </div>
+      <Feedback />
+      {openRoles && phoneView && (
+        <Modal
+          title="Switch panel"
+          placement="top"
+          onClose={() => setOpenRoles(false)}
+        >
+          <div className="modal-body phone-menu">
+            {ROLES.map((item) => (
+              <button
+                key={item.id}
+                className="phone-menu-row"
+                aria-current={role === item.id ? "true" : undefined}
+                onClick={() => switchRole(item.id)}
+              >
+                <Icon name={item.icon} size={22} />
+                <span>
+                  <strong>{item.name}</strong>
+                  <small>{item.subtitle}</small>
+                </span>
+                <Icon name={role === item.id ? "check" : "chevron"} size={17} />
+              </button>
+            ))}
+          </div>
+        </Modal>
+      )}
+      {notifications && (
+        <Modal
+          title="Notifications"
+          placement="top"
+          onClose={() => setNotifications(false)}
+        >
+          <div className="modal-body notification-list">
+            {hasUnread && (
+              <Button
+                variant="text"
+                onClick={() => markRead(alerts.map(({ id }) => id))}
+              >
+                Mark all as read
+              </Button>
+            )}
+            {!alerts.length && <p className="muted">No notifications yet.</p>}
+            {alerts.map((item) => (
+              <button
+                key={item.id}
+                className="phone-menu-row notification-row"
+                onClick={() => openAlert(item)}
+              >
+                <span
+                  className="notification-indicator"
+                  data-unread={!item.read || undefined}
+                  aria-label={item.read ? "Read" : "Unread"}
+                  role="img"
+                />
+                <span>
+                  <strong>{item.title}</strong>
+                  <small>{item.text}</small>
+                </span>
+                <Icon name="chevron" size={16} />
+              </button>
+            ))}
+          </div>
+        </Modal>
       )}
       {searchOpen && (
         <Modal
           title="Find a student"
+          placement="top"
           subtitle="Search by name or admission number."
           onClose={() => setSearchOpen(false)}
         >
@@ -704,7 +797,7 @@ export default function App() {
             <div className="search-box">
               <Icon name="search" />
               <input
-                autoFocus
+                data-initial-focus
                 value={globalSearch}
                 onChange={(e) => setGlobalSearch(e.target.value)}
                 placeholder="Try Aarav or 2026001"
@@ -718,7 +811,7 @@ export default function App() {
                 onClick={() => {
                   setSchoolId(s.school);
                   setSession(s.session);
-                  go("students");
+                  go("students", s.id);
                   setSearchOpen(false);
                 }}
               >
@@ -764,5 +857,12 @@ export default function App() {
         </Modal>
       )}
     </div>
+  );
+  return (
+    <FeedbackContext.Provider
+      value={toast ? { ...toast, dismiss: () => setToast(null) } : null}
+    >
+      {workspace}
+    </FeedbackContext.Provider>
   );
 }

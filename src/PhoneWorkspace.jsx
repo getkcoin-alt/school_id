@@ -25,23 +25,24 @@ export default function PhoneWorkspace({
   pageNames,
   groups,
   selectedRole,
-  switchRole,
+  onRoles,
   onSearch,
+  onNotifications,
+  hasUnread,
   reviewCount,
   children,
 }) {
-  const { data, go, role, update } = ctx;
-  const [sheet, setSheet] = useState(null);
+  const { data, go, role } = ctx;
+  const [menuOpen, setMenuOpen] = useState(false);
   const tabs = phoneTabs[role];
-  const close = () => setSheet(null);
+  const close = () => setMenuOpen(false);
   const navigate = (target) => {
     close();
     go(target);
   };
-  const hasUnread = data.notifications.some((item) => !item.read);
   const moreActive = !tabs.some(([key]) => key === page);
   useEffect(() => {
-    setSheet(null);
+    setMenuOpen(false);
   }, [page, role]);
 
   return (
@@ -57,7 +58,8 @@ export default function PhoneWorkspace({
         <button
           className="phone-role"
           aria-label={`Switch panel, current panel ${selectedRole.name}`}
-          onClick={() => setSheet("roles")}
+          aria-haspopup="dialog"
+          onClick={onRoles}
         >
           <span>ID Studio</span>
           <small>
@@ -67,6 +69,7 @@ export default function PhoneWorkspace({
         <button
           className="phone-icon"
           aria-label="Search students"
+          aria-haspopup="dialog"
           onClick={onSearch}
         >
           <Icon name="search" size={21} />
@@ -74,7 +77,8 @@ export default function PhoneWorkspace({
         <button
           className="phone-icon phone-bell"
           aria-label="Notifications"
-          onClick={() => setSheet("notifications")}
+          aria-haspopup="dialog"
+          onClick={onNotifications}
         >
           <Icon name="bell" size={21} />
           {hasUnread && <i />}
@@ -102,8 +106,9 @@ export default function PhoneWorkspace({
         ))}
         <button
           aria-current={moreActive ? "page" : undefined}
-          aria-expanded={sheet === "menu"}
-          onClick={() => setSheet("menu")}
+          aria-expanded={menuOpen}
+          aria-haspopup="dialog"
+          onClick={() => setMenuOpen(true)}
         >
           <span className="phone-tab-icon">
             <Icon name="more" size={22} />
@@ -111,7 +116,7 @@ export default function PhoneWorkspace({
           More
         </button>
       </nav>
-      {sheet === "menu" && (
+      {menuOpen && (
         <Modal title="Menu" onClose={close}>
           <div className="modal-body phone-menu">
             <label className="phone-session">
@@ -145,69 +150,6 @@ export default function PhoneWorkspace({
                   </button>
                 ))}
               </section>
-            ))}
-          </div>
-        </Modal>
-      )}
-      {sheet === "roles" && (
-        <Modal title="Switch panel" onClose={close}>
-          <div className="modal-body phone-menu">
-            {ROLES.map((item) => (
-              <button
-                key={item.id}
-                className="phone-menu-row"
-                aria-current={role === item.id ? "true" : undefined}
-                onClick={() => {
-                  close();
-                  switchRole(item.id);
-                }}
-              >
-                <Icon name={item.icon} size={22} />
-                <span>
-                  <strong>{item.name}</strong>
-                  <small>{item.subtitle}</small>
-                </span>
-                <Icon name={role === item.id ? "check" : "chevron"} size={17} />
-              </button>
-            ))}
-          </div>
-        </Modal>
-      )}
-      {sheet === "notifications" && (
-        <Modal title="Notifications" onClose={close}>
-          <div className="modal-body phone-menu">
-            {hasUnread && (
-              <Button
-                variant="text"
-                onClick={() =>
-                  update((d) => ({
-                    ...d,
-                    notifications: d.notifications.map((item) => ({
-                      ...item,
-                      read: true,
-                    })),
-                  }))
-                }
-              >
-                Mark all read
-              </Button>
-            )}
-            {data.notifications.length === 0 && <p>No notifications yet.</p>}
-            {data.notifications.map((item) => (
-              <button
-                key={item.id}
-                className="phone-menu-row"
-                onClick={() =>
-                  navigate(item.title.includes("PDF") ? "photos" : "review")
-                }
-              >
-                <Icon name={item.read ? "bell" : "dot"} size={20} />
-                <span>
-                  <strong>{item.title}</strong>
-                  <small>{item.text}</small>
-                </span>
-                <Icon name="chevron" size={16} />
-              </button>
             ))}
           </div>
         </Modal>

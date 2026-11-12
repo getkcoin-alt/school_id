@@ -1,4 +1,12 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import {
   ArrowRight,
   X,
@@ -300,73 +308,113 @@ export function Empty({
     </div>
   );
 }
-export function Modal({ title, subtitle, children, onClose, wide = false }) {
-  const ref = useRef(null),
-    closeRef = useRef(onClose);
-  closeRef.current = onClose;
-  useEffect(() => {
-    const previous = document.activeElement;
-    const bodyOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    const modal = ref.current;
-    const nodes = () =>
-      [
-        ...modal.querySelectorAll(
-          'button, input, select, textarea, a[href], [tabindex="0"]',
-        ),
-      ].filter((n) => !n.disabled && n.getClientRects().length);
-    nodes()[0]?.focus();
-    const key = (e) => {
-      if (e.key === "Escape") closeRef.current?.();
-      if (e.key === "Tab") {
-        const a = nodes(),
-          first = a[0],
-          last = a.at(-1);
-        if (e.shiftKey && document.activeElement === first) {
-          e.preventDefault();
-          last?.focus();
-        } else if (!e.shiftKey && document.activeElement === last) {
-          e.preventDefault();
-          first?.focus();
-        }
+export const FeedbackContext = createContext(null);
+
+export function Feedback({ inline = false }) {
+  const feedback = useContext(FeedbackContext);
+  if (!feedback) return null;
+  const { message, tone, dismiss } = feedback;
+  return (
+    <div
+      role="status"
+      className={`${inline ? "modal-feedback" : "toast"} ${tone}`}
+    >
+      <Icon name={tone === "error" ? "alert" : "checkCircle"} size={20} />
+      <span>{message}</span>
+      <IconButton icon="x" label="Dismiss message" onClick={dismiss} />
+    </div>
+  );
+}
+
+export function Modal({
+  title,
+  subtitle,
+  children,
+  onClose,
+  wide = false,
+  placement,
+}) {
+  const dialogRef = useRef(null);
+  const backdropPress = useRef(false);
+  const titleId = useId();
+  const subtitleId = useId();
+  useLayoutEffect(() => {
+    const dialog = dialogRef.current;
+    const trigger = document.activeElement;
+    const viewport = window.visualViewport;
+    const resize = () => {
+      dialog.style.setProperty(
+        "--dialog-viewport-top",
+        `${viewport.offsetTop}px`,
+      );
+      if (viewport.scale > 1) {
+        dialog.style.setProperty(
+          "--dialog-viewport-left",
+          `${viewport.offsetLeft}px`,
+        );
+        dialog.style.setProperty(
+          "--dialog-viewport-width",
+          `${viewport.width}px`,
+        );
+      } else {
+        dialog.style.removeProperty("--dialog-viewport-left");
+        dialog.style.removeProperty("--dialog-viewport-width");
       }
+      dialog.style.setProperty(
+        "--dialog-viewport-height",
+        `${viewport.height}px`,
+      );
     };
-    document.addEventListener("keydown", key);
+    if (viewport) {
+      resize();
+      viewport.addEventListener("resize", resize);
+      viewport.addEventListener("scroll", resize);
+    }
+    dialog.showModal();
+    dialog.querySelector("[data-initial-focus]")?.focus();
     return () => {
-      document.removeEventListener("keydown", key);
-      document.body.style.overflow = bodyOverflow;
-      previous?.focus?.();
+      viewport?.removeEventListener("resize", resize);
+      viewport?.removeEventListener("scroll", resize);
+      dialog.close();
+      if (trigger?.isConnected) trigger.focus({ preventScroll: true });
     };
   }, []);
   return (
-    <div
-      className="modal-overlay"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose?.();
+    <dialog
+      className={`modal-overlay${placement === "top" ? " modal-overlay--top" : ""}`}
+      aria-labelledby={titleId}
+      aria-describedby={subtitle ? subtitleId : undefined}
+      ref={dialogRef}
+      onCancel={(e) => {
+        e.preventDefault();
+        onClose?.();
+      }}
+      onPointerDown={(e) => {
+        backdropPress.current = e.target === e.currentTarget;
+      }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget && backdropPress.current) onClose?.();
       }}
     >
-      <div
-        className={`modal ${wide ? "wide" : ""}`}
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        ref={ref}
-      >
-        <div className="modal-head">
-          <div>
-            <h2>{title}</h2>
-            {subtitle && <p>{subtitle}</p>}
+      <div className={`modal${wide ? " wide" : ""}`}>
+        <div className="modal-bar">
+          <div className="modal-head">
+            <div>
+              <h2 id={titleId}>{title}</h2>
+              {subtitle && <p id={subtitleId}>{subtitle}</p>}
+            </div>
+            <IconButton
+              icon="x"
+              label="Close dialog"
+              onClick={onClose}
+              disabled={!onClose}
+            />
           </div>
-          <IconButton
-            icon="x"
-            label="Close dialog"
-            onClick={onClose}
-            disabled={!onClose}
-          />
+          <Feedback inline />
         </div>
         {children}
       </div>
-    </div>
+    </dialog>
   );
 }
 export function Callout({ icon = "help", children, tone = "blue" }) {

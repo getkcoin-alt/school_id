@@ -355,12 +355,17 @@ export function createSeed() {
     notifications: [
       {
         id: 1,
+        page: "review",
+        school: "SCH-001",
         title: "6 student details are ready to review",
         text: "Greenwood Public School · Review before printing",
         read: false,
       },
       {
         id: 2,
+        page: "photos",
+        school: "SCH-001",
+        pdf: "PDF-102",
         title: "Photo PDF received",
         text: "greenwood_class-6_photos.pdf · 4 pages",
         read: false,
