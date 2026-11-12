@@ -133,7 +133,7 @@ export default function Root() {
     return onAuthChange(() => {
       // Switching account (open account / return to super admin / sign in):
       // start on that account's own overview, not the page the last one was on.
-      window.history.replaceState({}, "", "/");
+      window.history.replaceState({}, "", auth.takeLanding() || "/");
       if (!auth.isSignedIn()) setState("login");
       else start();
     });

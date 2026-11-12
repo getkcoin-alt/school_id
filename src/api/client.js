@@ -10,6 +10,7 @@ const listeners = new Set();
 
 export const onAuthChange = (fn) => (listeners.add(fn), () => listeners.delete(fn));
 const emit = () => listeners.forEach((fn) => fn());
+let nextLanding = null;
 
 export class ApiError extends Error {
   constructor(status, body) {
@@ -130,10 +131,17 @@ export const auth = {
     accessToken = null;
     emit();
   },
-  async impersonate(userId) {
+  /** Opens another person's account; `landing` (e.g. "/?page=schools") picks the first page. */
+  async impersonate(userId, landing) {
     const b = await request("/auth/impersonate", { method: "POST", body: { userId }, token: accessToken });
     impersonation = { accessToken: b.accessToken, refreshToken: b.refreshToken, user: b.user };
+    nextLanding = landing || null;
     emit();
+  },
+  takeLanding() {
+    const l = nextLanding;
+    nextLanding = null;
+    return l;
   },
   async stopImpersonating() {
     if (!impersonation) return;

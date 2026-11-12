@@ -13,6 +13,7 @@ import {
   Empty,
   CardPreview,
   PDFProofButton,
+  DeleteConfirm,
 } from "../components.jsx";
 import {
   eligible,
@@ -937,6 +938,8 @@ export function Designs({ ctx }) {
     </>
   );
 }
+// Schools and batch creators may delete batches that have not started printing.
+const BATCH_DELETABLE = ["Submitted", "Cancelled"];
 export function PrintOrders({ ctx }) {
   const {
     data,
@@ -955,6 +958,7 @@ export function PrintOrders({ ctx }) {
     [selected, setSelected] = useState([]),
     [staffIds, setStaffIds] = useState([]),
     [detail, setDetail] = useState(null),
+    [removeBatch, setRemoveBatch] = useState(null),
     [nextStatus, setNextStatus] = useState(""),
     [tracking, setTracking] = useState(""),
     [carrier, setCarrier] = useState(""),
@@ -1268,6 +1272,13 @@ export function PrintOrders({ ctx }) {
                           exportBatch(b);
                         }}
                       />
+                      {ctx.live && (role === "super" || BATCH_DELETABLE.includes(b.status)) && (
+                        <IconButton
+                          icon="trash"
+                          label={"Delete batch " + (b.code || b.id)}
+                          onClick={() => setRemoveBatch(b)}
+                        />
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -1411,6 +1422,17 @@ export function PrintOrders({ ctx }) {
             </Button>
           </div>
         </Modal>
+      )}
+      {removeBatch && (
+        <DeleteConfirm
+          ctx={ctx}
+          path={`/batches/${removeBatch.id}`}
+          title={`Delete batch ${removeBatch.code || removeBatch.id}?`}
+          subtitle={`${data.schools.find((s) => s.id === removeBatch.school)?.name || ""} · ${removeBatch.count} cards · ${removeBatch.status}`}
+          deleteLabel="Delete batch"
+          doneText={`Batch ${removeBatch.code || removeBatch.id} deleted.`}
+          onClose={() => setRemoveBatch(null)}
+        />
       )}
       {detail && (
         <Modal

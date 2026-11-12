@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { FIELDS } from "../data.js";
 import {
   PageTitle,
@@ -15,6 +15,7 @@ import {
   Empty,
   CardPreview,
   PDFProofButton,
+  DeleteConfirm,
 } from "../components.jsx";
 import {
   uid,
@@ -441,36 +442,76 @@ export function ImportStudents({ ctx, onClose }) {
     </Modal>
   );
 }
+function DownloadMenu({ options, note }) {
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e) => !e.target.closest?.(".download-menu") && setOpen(false);
+    const esc = (e) => e.key === "Escape" && setOpen(false);
+    document.addEventListener("click", close);
+    document.addEventListener("keydown", esc);
+    return () => {
+      document.removeEventListener("click", close);
+      document.removeEventListener("keydown", esc);
+    };
+  }, [open]);
+  return (
+    <span className="download-menu">
+      <Button variant="secondary" icon="download" aria-expanded={open} onClick={() => setOpen(!open)}>
+        Download
+      </Button>
+      {open && (
+        <div className="download-menu-list" role="menu">
+          {options.map((o) => (
+            <button
+              key={o.label}
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setOpen(false);
+                o.run();
+              }}
+            >
+              <strong>{o.label}</strong>
+              <div className="dm-text">{o.text}</div>
+            </button>
+          ))}
+          {note && <small className="muted" style={{ padding: "6px 12px" }}>{note}</small>}
+        </div>
+      )}
+    </span>
+  );
+}
 function Downloads({ ctx, rows, query }) {
   const { live, school, data, role } = ctx;
   if (role === "regular" || (live && !ctx.permissions.download)) return null;
   const q = new URLSearchParams({ schoolId: school.id, session: ctx.session, ...query }).toString();
   const fields = schoolFieldList(data, school.id);
-  return (
-    <span className="download-group">
-      <Button
-        variant="text"
-        icon="download"
-        onClick={() =>
-          live
-            ? ctx.download(`/students/export.xlsx?${q}`, "students.xlsx")
-            : exportSheet(rows, fields, `${school.short}-students.xlsx`)
-        }
-      >
-        Excel
-      </Button>
-      {live && (
-        <>
-          <Button variant="text" icon="download" onClick={() => ctx.download(`/students/export.zip?${q}`, "students.zip")}>
-            Excel + photos
-          </Button>
-          <Button variant="text" icon="fileDown" onClick={() => ctx.download(`/students/checklist.pdf?${q}`, "checklist.pdf")}>
-            Checklist PDF
-          </Button>
-        </>
-      )}
-    </span>
-  );
+  const options = [
+    {
+      label: "Student list (Excel)",
+      text: "Every student's details in a spreadsheet, for records or editing.",
+      run: () =>
+        live
+          ? ctx.download(`/students/export.xlsx?${q}`, "students.xlsx")
+          : exportSheet(rows, fields, `${school.short}-students.xlsx`),
+    },
+    ...(live
+      ? [
+          {
+            label: "Student list with photos (ZIP)",
+            text: "The same spreadsheet plus every photo, named by photo number. Send this to a printer.",
+            run: () => ctx.download(`/students/export.zip?${q}`, "students.zip"),
+          },
+          {
+            label: "Checking sheet (PDF)",
+            text: "Printable pages with each student's photo and details, class by class, to check and sign before cards are printed.",
+            run: () => ctx.download(`/students/checklist.pdf?${q}`, "checklist.pdf"),
+          },
+        ]
+      : []),
+  ];
+  return <DownloadMenu options={options} note="Downloads follow the tab, class and status filters you have chosen." />;
 }
 export default function Students({ ctx }) {
   const { schoolStudents, update, notify, go, school, log, data } = ctx;
@@ -940,7 +981,19 @@ export default function Students({ ctx }) {
           </div>
         </Modal>
       )}
-      {remove && (
+      {remove && ctx.live && (
+        <DeleteConfirm
+          ctx={ctx}
+          path={`/students/${remove.id}`}
+          title={`Delete ${remove.name}?`}
+          subtitle={`${remove.admission ? `Admission no. ${remove.admission} · ` : ""}Class ${remove.classNo || "—"}${remove.section ? ` – ${remove.section}` : ""}`}
+          deleteLabel="Delete student"
+          doneText={`${remove.name} deleted.`}
+          onClose={() => setRemove(null)}
+          onDeleted={() => setSelected(selected.filter((id) => id !== remove.id))}
+        />
+      )}
+      {remove && !ctx.live && (
         <Modal
           title={`Delete ${remove.name}?`}
           subtitle="The student record and local submission will be removed. Existing print batches keep their history."

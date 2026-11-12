@@ -10,6 +10,7 @@ import { buildChecklist, buildWorkbook, sortForPrint, zipWithPhotos, type PrintR
 import { isoDate } from "../lib/normalize.js";
 import { fileUrl } from "../lib/storage.js";
 import { notifyAgent, notifySchool, notifySuperAdmins } from "../lib/notify.js";
+import { batchImpact } from "../lib/impact.js";
 
 const NEXT: Record<BatchStatus, BatchStatus[]> = {
   SUBMITTED: ["IN_PROGRESS", "CANCELLED"],
@@ -220,6 +221,36 @@ export async function batchRoutes(app: FastifyInstance) {
       await notifySchool(b.schoolId, `Batch ${b.code}: ${body.status.toLowerCase().replace("_", " ")}`, body.tracking ? `${body.carrier ?? "Tracking"} ${body.tracking}` : undefined, "printing", true);
     }
     return serializeBatch(updated);
+  });
+
+  // ---- Delete: open/cancelled batches by the school, its creator or a super admin;
+  // printed and delivered batches only by a super admin. Cards not yet printed
+  // go back to Approved so they can join a new batch. ----
+  const mayDelete = (p: ReturnType<typeof principal>, b: { status: string; createdById: string | null }) =>
+    isSuper(p) || (["SUBMITTED", "CANCELLED"].includes(b.status) && (isSchool(p) || b.createdById === p.userId));
+
+  app.get("/:id/impact", async (req) => {
+    const p = principal(req);
+    const b = await loadBatch(p, (req.params as { id: string }).id);
+    require(mayDelete(p, b), "Only a super admin can delete a batch that is being printed or already printed.");
+    return batchImpact(b);
+  });
+
+  app.delete("/:id", async (req) => {
+    const p = principal(req);
+    const b = await loadBatch(p, (req.params as { id: string }).id);
+    require(mayDelete(p, b), "Only a super admin can delete a batch that is being printed or already printed.");
+    await prisma.$transaction(async (tx) => {
+      if (["SUBMITTED", "IN_PROGRESS", "CANCELLED"].includes(b.status)) {
+        const items = await tx.printBatchItem.findMany({ where: { batchId: b.id }, select: { studentId: true, staffId: true } });
+        await tx.student.updateMany({ where: { id: { in: items.map((i) => i.studentId!).filter(Boolean) }, status: "SUBMITTED_FOR_PRINT" }, data: { status: "APPROVED" } });
+        await tx.staff.updateMany({ where: { id: { in: items.map((i) => i.staffId!).filter(Boolean) } }, data: { reviewStatus: "APPROVED" } });
+      }
+      await tx.orderForm.updateMany({ where: { batchId: b.id }, data: { batchId: null } });
+      await tx.printBatch.delete({ where: { id: b.id } });
+    });
+    await audit(req, { action: "batch.deleted", summary: `${p.name} deleted batch ${b.code} (${b.studentCount + b.staffCount} cards, was ${b.status.toLowerCase().replace("_", " ")})`, entityType: "batch", entityId: b.id, schoolId: b.schoolId });
+    return { ok: true };
   });
 
   // ---- Downloads: spreadsheet, ZIP with photos (change sheet #5) and proof checklist (#15) ----

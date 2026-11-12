@@ -376,6 +376,74 @@ export function Callout({ icon = "help", children, tone = "blue" }) {
     </div>
   );
 }
+/**
+ * Live-mode delete confirmation: loads the server's summary of what will be
+ * affected (GET {path}/impact), then deletes (DELETE {path}) and reloads.
+ * `confirmText`, when given, must be typed to enable the delete button.
+ */
+export function DeleteConfirm({ ctx, path, title, subtitle, confirmText, deleteLabel = "Delete", doneText, onClose, onDeleted }) {
+  const [impact, setImpact] = useState(null),
+    [error, setError] = useState(""),
+    [typed, setTyped] = useState(""),
+    [busy, setBusy] = useState(false);
+  useEffect(() => {
+    ctx.api
+      .get(`${path}/impact`)
+      .then(setImpact)
+      .catch((e) => setError(e.message || "Could not check what this affects."));
+  }, [path]);
+  const ready = impact && (!confirmText || typed.trim().toLowerCase() === confirmText.trim().toLowerCase());
+  const run = async () => {
+    setBusy(true);
+    try {
+      await ctx.api.del(path);
+      await ctx.reload().catch(() => {});
+      ctx.notify(doneText || "Deleted.");
+      onDeleted?.();
+      onClose();
+    } catch (e) {
+      setError(e.message || "Could not delete. Try again.");
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal title={title} subtitle={subtitle} onClose={onClose}>
+      <div className="modal-body delete-impact">
+        {!impact && !error && <p className="muted">Checking what this will affect…</p>}
+        {error && <Callout icon="alert" tone="coral">{error}</Callout>}
+        {impact && (
+          <>
+            <p><strong>This will happen:</strong></p>
+            <ul>
+              {impact.lines.map((l) => (
+                <li key={l}>{l}</li>
+              ))}
+            </ul>
+            {impact.warnings.map((w) => (
+              <Callout key={w} icon="alert" tone="amber">
+                {w}
+              </Callout>
+            ))}
+            <p className="muted">This cannot be undone from the app.</p>
+            {confirmText && (
+              <Field label={`Type "${confirmText}" to confirm`}>
+                <input value={typed} onChange={(e) => setTyped(e.target.value)} autoComplete="off" />
+              </Field>
+            )}
+          </>
+        )}
+      </div>
+      <div className="modal-actions">
+        <Button variant="secondary" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button className="danger" icon="trash" disabled={!ready || busy} onClick={run}>
+          {busy ? "Deleting…" : deleteLabel}
+        </Button>
+      </div>
+    </Modal>
+  );
+}
 export function CardPreview({
   student,
   school,

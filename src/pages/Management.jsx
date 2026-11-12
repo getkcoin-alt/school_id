@@ -13,6 +13,7 @@ import {
   Field,
   Callout,
   Empty,
+  DeleteConfirm,
 } from "../components.jsx";
 import { auth } from "../api/client.js";
 import {
@@ -88,23 +89,23 @@ export function Logins({ ctx, schoolId, agentId, defaultName = "", defaultEmail 
           </span>
         </div>
       ))}
-      {users && schoolId && (
+      {users && (schoolId || agentId) && (
         <div className="login-add">
-          {!users.length && <Callout tone="amber">This school has no admin login yet. Add one and they will get an email to set their password.</Callout>}
+          {!users.length && <Callout tone="amber">{schoolId ? "This school has no admin login yet." : "This agent has no login yet."} Add one and they will get an email to set their password.</Callout>}
           <div className="form-grid">
-            <Field label="Admin name">
+            <Field label={schoolId ? "Admin name" : "Name"}>
               <input value={name} onChange={(e) => setName(e.target.value)} />
             </Field>
-            <Field label="Admin login email">
+            <Field label="Login email">
               <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
             </Field>
           </div>
           <Button
             icon="plus"
             disabled={busy || name.trim().length < 2 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)}
-            onClick={() => run(() => ctx.api.post("/users", { role: "SCHOOL_ADMIN", schoolId, name: name.trim(), email: email.trim() }), `Login created. A setup email was sent to ${email.trim()}.`).then(() => setEmail(""))}
+            onClick={() => run(() => ctx.api.post("/users", schoolId ? { role: "SCHOOL_ADMIN", schoolId, name: name.trim(), email: email.trim() } : { role: "AGENT", agentId, name: name.trim(), email: email.trim() }), `Login created. A setup email was sent to ${email.trim()}.`).then(() => setEmail(""))}
           >
-            Add school admin login
+            {schoolId ? "Add school admin login" : "Add agent login"}
           </Button>
         </div>
       )}
@@ -285,7 +286,9 @@ export function Schools({ ctx }) {
   const { data, availableSchools, setSchoolId, go, update, notify, log } = ctx;
   const [query, setQuery] = useState(""),
     [edit, setEdit] = useState(null),
-    [detail, setDetail] = useState(null);
+    [detail, setDetail] = useState(null),
+    [remove, setRemove] = useState(null);
+  const canDelete = ctx.live && ["super", "premium", "regular"].includes(ctx.role);
   const rows = availableSchools.filter((s) =>
     `${s.name} ${s.city}`.toLowerCase().includes(query.toLowerCase()),
   );
@@ -399,6 +402,13 @@ export function Schools({ ctx }) {
                           })
                         }
                       />
+                      {canDelete && (
+                        <IconButton
+                          icon="trash"
+                          label={"Delete " + s.name}
+                          onClick={() => setRemove(s)}
+                        />
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -468,9 +478,34 @@ export function Schools({ ctx }) {
               >
                 Photo PDFs
               </Button>
+              {canDelete && (
+                <Button
+                  variant="secondary"
+                  className="danger"
+                  icon="trash"
+                  onClick={() => {
+                    setRemove(detail);
+                    setDetail(null);
+                  }}
+                >
+                  Delete school
+                </Button>
+              )}
             </div>
           </div>
         </Modal>
+      )}
+      {remove && (
+        <DeleteConfirm
+          ctx={ctx}
+          path={`/schools/${remove.id}`}
+          title={`Delete ${remove.name}?`}
+          subtitle={`${remove.city || ""}${remove.city ? " · " : ""}${remove.email || ""}`}
+          confirmText={remove.name}
+          deleteLabel="Delete school"
+          doneText={`${remove.name} deleted.`}
+          onClose={() => setRemove(null)}
+        />
       )}
     </>
   );
@@ -480,7 +515,23 @@ export function Agents({ ctx }) {
   const [tab, setTab] = useState("All"),
     [query, setQuery] = useState(""),
     [edit, setEdit] = useState(null),
-    [reset, setReset] = useState(null);
+    [reset, setReset] = useState(null),
+    [view, setView] = useState(null),
+    [remove, setRemove] = useState(null);
+  // Opens the agent's own account on their Schools page (first active login).
+  const openAgent = async (a) => {
+    try {
+      const users = (await ctx.api.get(`/users?agentId=${a.id}`)).items.filter((u) => u.status !== "DISABLED");
+      const u = users.find((x) => x.status === "ACTIVE") || users[0];
+      if (!u) {
+        notify(`${a.name} has no login yet. Open View to add one.`, "error");
+        return;
+      }
+      await auth.impersonate(u.id, "/?page=schools");
+    } catch (e) {
+      notify(e.message, "error");
+    }
+  };
   const empty = {
     id: uid("AG"),
     name: "",
@@ -519,7 +570,7 @@ export function Agents({ ctx }) {
       ),
     );
     setEdit(null);
-    notify("Agent saved in the preview.");
+    notify(ctx.live ? "Agent saved." : "Agent saved in the preview.");
   };
   return (
     <>
@@ -586,12 +637,24 @@ export function Agents({ ctx }) {
                     <small className="block muted">{a.phone}</small>
                   </td>
                   <td>
-                    <a
-                      href={`/?panel=${a.type === "Premium" ? "premium" : "regular"}&page=schools`}
-                    >
-                      {data.schools.filter((s) => s.agent === a.id).length}{" "}
-                      schools
-                    </a>
+                    {ctx.live ? (
+                      <button
+                        type="button"
+                        className="link-button"
+                        title={`Open ${a.name}'s account and see their schools`}
+                        onClick={() => openAgent(a)}
+                      >
+                        {data.schools.filter((s) => s.agent === a.id).length}{" "}
+                        schools
+                      </button>
+                    ) : (
+                      <a
+                        href={`/?panel=${a.type === "Premium" ? "premium" : "regular"}&page=schools`}
+                      >
+                        {data.schools.filter((s) => s.agent === a.id).length}{" "}
+                        schools
+                      </a>
+                    )}
                   </td>
                   <td>
                     {a.type === "Premium" ? (
@@ -608,16 +671,31 @@ export function Agents({ ctx }) {
                   </td>
                   <td>
                     <div className="row-actions">
+                      {ctx.live && (
+                        <IconButton
+                          icon="eye"
+                          label={"View " + a.name}
+                          onClick={() => setView(a)}
+                        />
+                      )}
                       <IconButton
                         icon="edit"
                         label={"Edit agent " + a.name}
                         onClick={() => setEdit({ ...a })}
                       />
-                      <IconButton
-                        icon="lock"
-                        label={"Reset access for " + a.name}
-                        onClick={() => setReset(a)}
-                      />
+                      {ctx.live ? (
+                        <IconButton
+                          icon="trash"
+                          label={"Delete agent " + a.name}
+                          onClick={() => setRemove(a)}
+                        />
+                      ) : (
+                        <IconButton
+                          icon="lock"
+                          label={"Reset access for " + a.name}
+                          onClick={() => setReset(a)}
+                        />
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -733,6 +811,60 @@ export function Agents({ ctx }) {
             </div>
           </form>
         </Modal>
+      )}
+      {view && (
+        <Modal
+          title={view.name}
+          subtitle={`${view.type} agent${view.company ? ` · ${view.company}` : ""}`}
+          onClose={() => setView(null)}
+        >
+          <div className="modal-body">
+            <dl className="details-list">
+              {[
+                ["Email", view.email],
+                ["Phone", view.phone],
+                ["City", view.city],
+                ["Schools", data.schools.filter((s) => s.agent === view.id).map((s) => s.name).join(", ")],
+                ["Subscription", view.type === "Premium" ? `Valid until ${fmtDate(view.end)}` : "Not required"],
+                ["Status", view.status],
+              ].map(([k, v]) => (
+                <div key={k}>
+                  <dt>{k}</dt>
+                  <dd>{v || "—"}</dd>
+                </div>
+              ))}
+            </dl>
+            <Logins ctx={ctx} agentId={view.id} defaultName={view.name} defaultEmail={view.email} />
+            <div className="button-row">
+              <Button icon="school" onClick={() => openAgent(view)}>
+                Open account on Schools
+              </Button>
+              <Button
+                variant="secondary"
+                className="danger"
+                icon="trash"
+                onClick={() => {
+                  setRemove(view);
+                  setView(null);
+                }}
+              >
+                Delete agent
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+      {remove && (
+        <DeleteConfirm
+          ctx={ctx}
+          path={`/agents/${remove.id}`}
+          title={`Delete ${remove.name}?`}
+          subtitle={`${remove.type} agent${remove.company ? ` · ${remove.company}` : ""}`}
+          confirmText={remove.name}
+          deleteLabel="Delete agent"
+          doneText={`${remove.name} deleted. Their schools are now managed by ID Studio.`}
+          onClose={() => setRemove(null)}
+        />
       )}
       {reset && (
         <Modal

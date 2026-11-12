@@ -1914,7 +1914,7 @@ th:last-child {
 .callout.amber {
   background: #fffaee;
   border-color: #faf0d5;
-  color: #b29b6c;
+  color: #8a6d1f;
 }
 .callout.amber svg {
   color: #cdb77f;
@@ -7134,4 +7134,89 @@ td small {
 
 .nav-group > button {
   white-space: nowrap;
+}
+
+.delete-impact {
+  display: grid;
+  gap: 12px;
+}
+.delete-impact ul {
+  margin: 0;
+  padding-left: 20px;
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+  color: #3e4652;
+}
+.delete-impact p {
+  margin: 0;
+  font-size: 13px;
+}
+.download-menu {
+  position: relative;
+  display: inline-block;
+}
+.download-menu-list {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 50;
+  width: 320px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 10px 30px #1c2b3d1f;
+  padding: 6px;
+  display: grid;
+}
+.download-menu-list button {
+  display: grid;
+  gap: 3px;
+  text-align: left;
+  padding: 10px 12px;
+  border-radius: 7px;
+  background: transparent;
+}
+.download-menu-list button:hover,
+.download-menu-list button:focus-visible {
+  background: #f5f6f8;
+}
+.download-menu-list strong {
+  font-size: 13px;
+  color: #262d38;
+}
+.download-menu-list .dm-text {
+  font-size: 12px;
+  color: #656c77;
+  line-height: 1.45;
+  font-weight: 400;
+}
+.download-menu-list button {
+  border-bottom: 0;
+  height: auto;
+  min-height: 0;
+}
+.link-button {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--coral);
+  font-weight: 550;
+  cursor: pointer;
+  font-size: inherit;
+}
+.link-button:hover {
+  text-decoration: underline;
+}
+.table-tabs .download-menu-list button:not(.btn) {
+  padding: 10px 12px;
+  color: inherit;
+  border-bottom: 0;
+}
+.table-tabs .download-menu .btn > span {
+  background: none;
+  padding: 0;
+  margin: 0;
+  font-size: 13px;
+  color: inherit;
 }

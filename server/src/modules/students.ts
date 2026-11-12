@@ -9,6 +9,7 @@ import { audit } from "../lib/audit.js";
 import { schoolFields, STUDENT_FIELDS } from "../lib/fields.js";
 import { findDuplicate, missingFields, serializeStudent, studentInput, toData } from "../lib/students.js";
 import { buildChecklist, buildWorkbook, zipWithPhotos, type PrintRecord } from "../lib/exporter.js";
+import { studentImpact } from "../lib/impact.js";
 import { cellText, dedupeKey, headerKey, parseDate } from "../lib/normalize.js";
 import { normalisePhoto } from "../lib/images.js";
 import { storage } from "../lib/storage.js";
@@ -129,6 +130,13 @@ export async function studentRoutes(app: FastifyInstance) {
     });
     await audit(req, { action: "student.updated", summary: `${p.name} edited ${updated.name}`, entityType: "student", entityId: s.id, schoolId: s.schoolId, meta: { fields: Object.keys(data) } });
     return serializeStudent(updated);
+  });
+
+  app.get("/:id/impact", async (req) => {
+    const p = principal(req);
+    require(can.editStudents(p));
+    const s = await loadStudent(p, (req.params as { id: string }).id);
+    return studentImpact(s.id);
   });
 
   app.delete("/:id", async (req) => {

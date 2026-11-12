@@ -29,6 +29,7 @@ export const isSchool = (p: Principal) => p.role === "SCHOOL_ADMIN";
 export const can = {
   manageAgents: (p: Principal) => isSuper(p),
   manageSchools: (p: Principal) => isSuper(p),
+  deleteSchools: (p: Principal) => isSuper(p) || isAgent(p),
   editSchoolProfile: (p: Principal) => isSuper(p) || isSchool(p),
   // Premium agents and schools may export; regular agents may not.
   download: (p: Principal) => isSuper(p) || isSchool(p) || isPremium(p),

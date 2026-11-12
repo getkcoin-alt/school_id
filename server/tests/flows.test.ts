@@ -351,3 +351,44 @@ describe("partial updates", () => {
     expect(cleared.json().email).toBeNull();
   });
 });
+
+describe("deleting with an impact summary", () => {
+  it("deletes an open batch and returns its cards to Approved", async () => {
+    const s = await prisma.student.findFirst({ where: { schoolId: ctx.schoolId, deletedAt: null, photoKey: { not: null }, status: { not: "SUBMITTED_FOR_PRINT" } } });
+    expect(s).toBeTruthy();
+    await prisma.student.update({ where: { id: s!.id }, data: { status: "APPROVED" } });
+    const b = (await api(app, ctx.school).post("/batches", { studentIds: [s!.id] })).json();
+    expect((await prisma.student.findUnique({ where: { id: s!.id } }))!.status).toBe("SUBMITTED_FOR_PRINT");
+    const impact = (await api(app, ctx.school).get(`/batches/${b.id}/impact`)).json();
+    expect(impact.lines[0]).toContain("go back to Approved");
+    expect((await api(app, ctx.school).del(`/batches/${b.id}`)).statusCode).toBe(200);
+    expect((await prisma.student.findUnique({ where: { id: s!.id } }))!.status).toBe("APPROVED");
+    expect(await prisma.printBatch.count({ where: { id: b.id } })).toBe(0);
+  });
+
+  it("lets only a super admin delete a delivered batch", async () => {
+    expect((await api(app, ctx.school).del(`/batches/${ctx.batch}`)).statusCode).toBe(403);
+    const impact = (await api(app, root).get(`/batches/${ctx.batch}/impact`)).json();
+    expect(impact.lines[0]).toContain("delivered");
+    expect((await api(app, root).del(`/batches/${ctx.batch}`)).statusCode).toBe(200);
+    expect((await prisma.orderForm.findMany({ where: { schoolId: ctx.schoolId } })).every((f) => f.batchId === null)).toBe(true);
+  });
+
+  it("describes what a student and an agent delete affects", async () => {
+    const st = (await api(app, ctx.school).get(`/students/${ctx.riya}/impact`)).json();
+    expect(st.lines[0]).toContain("will be removed");
+    const ag = (await api(app, root).get(`/agents/${ctx.premiumAgentId}/impact`)).json();
+    expect(ag.lines[0]).toContain("Govt Sr Sec School");
+    expect((await api(app, ctx.premium).get(`/agents/${ctx.premiumAgentId}/impact`)).statusCode).toBe(403);
+  });
+
+  it("lets an agent delete its own school, which signs the school out", async () => {
+    expect((await api(app, ctx.regular).get(`/schools/${ctx.schoolId}/impact`)).statusCode).toBe(404);
+    expect((await api(app, ctx.other).get(`/schools/${ctx.otherSchoolId}/impact`)).statusCode).toBe(403);
+    const impact = (await api(app, ctx.regular).get(`/schools/${ctx.otherSchoolId}/impact`)).json();
+    expect(impact.lines.join(" ")).toContain("school login");
+    expect((await api(app, ctx.regular).del(`/schools/${ctx.otherSchoolId}`)).statusCode).toBe(200);
+    expect((await api(app, ctx.other).get("/workspace")).statusCode).toBe(401);
+    expect((await api(app, root).get("/schools")).json().items.some((s: { id: string }) => s.id === ctx.otherSchoolId)).toBe(false);
+  });
+});

@@ -10,6 +10,7 @@ import { keep, normalizePhone, validPhone } from "../lib/normalize.js";
 import { schoolFields, seedSchoolFields } from "../lib/fields.js";
 import { academicYear } from "../lib/session.js";
 import { fileUrl } from "../lib/storage.js";
+import { schoolImpact } from "../lib/impact.js";
 
 export async function serializeSchool(s: School & { agent?: { id: string; code: string; name: string; tier: string } | null }) {
   return {
@@ -191,13 +192,25 @@ export async function schoolRoutes(app: FastifyInstance) {
     return serializeSchool(updated);
   });
 
+  // What deleting a school removes; shown before the user confirms.
+  app.get("/:id/impact", async (req) => {
+    const p = principal(req);
+    require(can.deleteSchools(p), "Only a super admin or the school's agent can delete a school.");
+    const school = await accessSchool(p, (req.params as { id: string }).id);
+    return schoolImpact(school.id);
+  });
+
+  // Super admins delete any school; agents delete their own schools.
   app.delete("/:id", async (req) => {
     const p = principal(req);
-    require(can.manageSchools(p));
+    require(can.deleteSchools(p), "Only a super admin or the school's agent can delete a school.");
     const school = await accessSchool(p, (req.params as { id: string }).id);
+    const open = await prisma.printBatch.findMany({ where: { schoolId: school.id, status: { in: ["SUBMITTED", "IN_PROGRESS"] } }, select: { id: true } });
     await prisma.$transaction([
       prisma.school.update({ where: { id: school.id }, data: { deletedAt: new Date(), status: "INACTIVE" } }),
       prisma.user.updateMany({ where: { schoolId: school.id }, data: { status: "DISABLED", tokenVersion: { increment: 1 } } }),
+      prisma.refreshToken.updateMany({ where: { user: { schoolId: school.id }, revokedAt: null }, data: { revokedAt: new Date() } }),
+      prisma.printBatch.updateMany({ where: { id: { in: open.map((b) => b.id) } }, data: { status: "CANCELLED" } }),
     ]);
     await audit(req, { action: "school.deleted", summary: `${p.name} removed ${school.name}`, entityType: "school", entityId: school.id, schoolId: school.id });
     return { ok: true };

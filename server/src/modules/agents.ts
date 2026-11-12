@@ -8,6 +8,7 @@ import { audit } from "../lib/audit.js";
 import { normaliseEmail, sendOnboardingInvite } from "../lib/onboarding.js";
 import { keep, normalizePhone, parseDate, isoDate, validPhone } from "../lib/normalize.js";
 import { fileUrl } from "../lib/storage.js";
+import { agentImpact } from "../lib/impact.js";
 
 export async function serializeAgent(a: Agent & { _count?: { schools: number } }) {
   return {
@@ -125,6 +126,15 @@ export async function agentRoutes(app: FastifyInstance) {
     return serializeAgent(agent);
   });
 
+  app.get("/:id/impact", async (req) => {
+    const p = principal(req);
+    require(can.manageAgents(p));
+    const { id } = req.params as { id: string };
+    const agent = await prisma.agent.findFirst({ where: { id, deletedAt: null } });
+    if (!agent) throw notFound("Agent");
+    return agentImpact(id);
+  });
+
   app.delete("/:id", async (req) => {
     const p = principal(req);
     require(can.manageAgents(p));
@@ -134,6 +144,9 @@ export async function agentRoutes(app: FastifyInstance) {
     await prisma.$transaction([
       prisma.school.updateMany({ where: { agentId: id }, data: { agentId: null } }),
       prisma.user.updateMany({ where: { agentId: id }, data: { status: "DISABLED", tokenVersion: { increment: 1 } } }),
+      prisma.refreshToken.updateMany({ where: { user: { agentId: id }, revokedAt: null }, data: { revokedAt: new Date() } }),
+      prisma.printBatch.updateMany({ where: { fulfillerAgentId: id, status: { in: ["SUBMITTED", "IN_PROGRESS"] } }, data: { fulfillerAgentId: null, fulfilledBy: "CENTRAL" } }),
+      prisma.design.updateMany({ where: { agentId: id, deletedAt: null }, data: { deletedAt: new Date() } }),
       prisma.agent.update({ where: { id }, data: { deletedAt: new Date(), status: "INACTIVE" } }),
     ]);
     await audit(req, { action: "agent.deleted", summary: `${p.name} removed agent ${agent.name}; their schools are now unassigned`, entityType: "agent", entityId: id, agentId: id });
