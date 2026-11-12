@@ -15,6 +15,94 @@ import {
   Empty,
 } from "../components.jsx";
 import { uid, fmtDate, exportCSV, download, csvText } from "../lib.js";
+import { deleteFiles } from "../files.js";
+
+function workspaceLink(ctx, params) {
+  return `${ctx.phoneView ? "/app" : "/"}?${new URLSearchParams(params)}`;
+}
+
+function SetupAccess({ ctx, account, collection, onClose }) {
+  const label = account.setupAt ? "Resend setup email" : "Send setup email";
+  return (
+    <Modal title={label} subtitle={account.email} onClose={onClose}>
+      <div className="modal-body">
+        <Callout icon="lock">
+          This demo records the setup request in Activity. Live accounts and
+          email delivery require the connected service.
+        </Callout>
+      </div>
+      <div className="modal-actions">
+        <Button variant="secondary" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button
+          icon="email"
+          onClick={() => {
+            const setupAt = new Date().toISOString();
+            ctx.update((d) =>
+              ctx.log(
+                {
+                  ...d,
+                  [collection]: d[collection].map((record) =>
+                    record.id === account.id ? { ...record, setupAt } : record,
+                  ),
+                },
+                `Simulated ${account.setupAt ? "resend of " : ""}account setup email for ${account.email}`,
+                "email",
+              ),
+            );
+            ctx.notify("Demo setup email recorded.");
+            onClose();
+          }}
+        >
+          {label}
+        </Button>
+      </div>
+    </Modal>
+  );
+}
+
+function DeleteAccount({ account, children, onClose, onDelete }) {
+  const [confirmation, setConfirmation] = useState("");
+  const [busy, setBusy] = useState(false);
+  return (
+    <Modal
+      title={`Delete ${account.name}?`}
+      subtitle="Review the impact and type the name to confirm."
+      onClose={busy ? undefined : onClose}
+    >
+      <div className="modal-body">
+        {children}
+        <Field label={`Type ${account.name}`}>
+          <input
+            autoComplete="off"
+            value={confirmation}
+            onChange={(e) => setConfirmation(e.target.value)}
+          />
+        </Field>
+      </div>
+      <div className="modal-actions">
+        <Button variant="secondary" onClick={onClose} disabled={busy}>
+          Cancel
+        </Button>
+        <Button
+          disabled={busy || confirmation.trim() !== account.name.trim()}
+          onClick={async () => {
+            setBusy(true);
+            try {
+              await onDelete();
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          {busy ? "Deleting…" : "Confirm deletion"}
+        </Button>
+      </div>
+    </Modal>
+  );
+}
+
 export function SchoolForm({ ctx, value, onClose }) {
   const { data, update, notify, log } = ctx;
   const [s, setS] = useState(
@@ -32,7 +120,7 @@ export function SchoolForm({ ctx, value, onClose }) {
           state: "Rajasthan",
           country: "India",
           pin: "",
-          agent: ctx.role === "regular" ? "AG-002" : "AG-001",
+          agent: ctx.agentId || "",
           status: "Active",
           studentRounds: 1,
           staffRounds: 1,
@@ -107,12 +195,13 @@ export function SchoolForm({ ctx, value, onClose }) {
               <select
                 value={s.agent}
                 onChange={(e) => set("agent", e.target.value)}
+                disabled={Boolean(ctx.agentId) || ctx.role === "school"}
               >
+                <option value="">Unassigned</option>
                 {data.agents
                   .filter(
                     (a) =>
-                      ctx.role === "super" ||
-                      a.id === (ctx.role === "regular" ? "AG-002" : "AG-001"),
+                      ctx.role === "super" || a.id === (ctx.agentId || s.agent),
                   )
                   .map((a) => (
                     <option key={a.id} value={a.id}>
@@ -172,7 +261,56 @@ export function Schools({ ctx }) {
   const { data, availableSchools, setSchoolId, go, update, notify, log } = ctx;
   const [query, setQuery] = useState(""),
     [edit, setEdit] = useState(null),
-    [detail, setDetail] = useState(null);
+    [detail, setDetail] = useState(null),
+    [setup, setSetup] = useState(null),
+    [removeSchool, setRemoveSchool] = useState(null);
+  const removeSchoolData = async () => {
+    if (ctx.role !== "super" || data.schools.length < 2) return;
+    const { id, name } = removeSchool;
+    const collections = [
+      "students",
+      "staff",
+      "uploads",
+      "photoLibrary",
+      "batches",
+      "orderForms",
+      "outbox",
+      "customFields",
+    ];
+    try {
+      await deleteFiles(
+        ["uploads", "photoLibrary", "orderForms"].flatMap((key) =>
+          (data[key] || [])
+            .filter((record) => record.school === id && record.fileKey)
+            .map((record) => record.fileKey),
+        ),
+      );
+      update((d) => {
+        const next = {
+          ...d,
+          schools: d.schools.filter((school) => school.id !== id),
+        };
+        for (const key of collections)
+          next[key] = (d[key] || []).filter((record) => record.school !== id);
+        for (const key of ["fieldScope", "staffFieldScope", "schoolDesigns"]) {
+          if (d[key]) {
+            next[key] = { ...d[key] };
+            delete next[key][id];
+          }
+        }
+        next.profiles = { ...d.profiles };
+        delete next.profiles[`school:${id}`];
+        return log(next, `Deleted school ${name}`, "school");
+      });
+      if (ctx.schoolId === id)
+        setSchoolId(data.schools.find((school) => school.id !== id).id);
+      setRemoveSchool(null);
+      setDetail(null);
+      notify("School and its demo records deleted.");
+    } catch {
+      notify("Could not delete the school files. Try again.", "error");
+    }
+  };
   const rows = availableSchools.filter((s) =>
     `${s.name} ${s.city}`.toLowerCase().includes(query.toLowerCase()),
   );
@@ -338,10 +476,36 @@ export function Schools({ ctx }) {
             <div className="button-row">
               <a
                 className="btn secondary"
-                href={`/?panel=school&school=${detail.id}`}
+                href={workspaceLink(ctx, {
+                  panel: "school",
+                  page: "overview",
+                  school: detail.id,
+                })}
               >
                 Open School Admin <Icon name="external" size={15} />
               </a>
+              <Button
+                variant="secondary"
+                icon="email"
+                onClick={() => {
+                  setSetup(detail);
+                  setDetail(null);
+                }}
+              >
+                {detail.setupAt ? "Resend setup email" : "Send setup email"}
+              </Button>
+              {ctx.role === "super" && data.schools.length > 1 && (
+                <Button
+                  variant="secondary"
+                  icon="trash"
+                  onClick={() => {
+                    setRemoveSchool(detail);
+                    setDetail(null);
+                  }}
+                >
+                  Delete school
+                </Button>
+              )}
               <Button
                 onClick={() => {
                   setSchoolId(detail.id);
@@ -356,6 +520,37 @@ export function Schools({ ctx }) {
           </div>
         </Modal>
       )}
+      {setup && (
+        <SetupAccess
+          ctx={ctx}
+          account={setup}
+          collection="schools"
+          onClose={() => setSetup(null)}
+        />
+      )}
+      {removeSchool && (
+        <DeleteAccount
+          account={removeSchool}
+          onDelete={removeSchoolData}
+          onClose={() => setRemoveSchool(null)}
+        >
+          <ul>
+            <li>
+              {data.students.filter((s) => s.school === removeSchool.id).length}{" "}
+              student and{" "}
+              {data.staff.filter((s) => s.school === removeSchool.id).length}{" "}
+              staff records
+            </li>
+            <li>
+              {data.batches.filter((b) => b.school === removeSchool.id).length}{" "}
+              print batches
+            </li>
+            <li>
+              School photos, order forms, demo invitations, and ID settings
+            </li>
+          </ul>
+        </DeleteAccount>
+      )}
     </>
   );
 }
@@ -364,7 +559,30 @@ export function Agents({ ctx }) {
   const [tab, setTab] = useState("All"),
     [query, setQuery] = useState(""),
     [edit, setEdit] = useState(null),
-    [reset, setReset] = useState(null);
+    [reset, setReset] = useState(null),
+    [setup, setSetup] = useState(null),
+    [removeAgent, setRemoveAgent] = useState(null);
+  const removeAgentData = () => {
+    if (ctx.role !== "super") return;
+    update((d) => {
+      const profiles = { ...d.profiles };
+      delete profiles[`agent:${removeAgent.id}`];
+      return log(
+        {
+          ...d,
+          profiles,
+          agents: d.agents.filter((agent) => agent.id !== removeAgent.id),
+          schools: d.schools.map((school) =>
+            school.agent === removeAgent.id ? { ...school, agent: "" } : school,
+          ),
+        },
+        `Deleted agent ${removeAgent.name}`,
+        "briefcase",
+      );
+    });
+    setRemoveAgent(null);
+    notify("Agent deleted. Their schools are now unassigned.");
+  };
   const empty = {
     id: uid("AG"),
     name: "",
@@ -471,7 +689,11 @@ export function Agents({ ctx }) {
                   </td>
                   <td data-label="SCHOOLS">
                     <a
-                      href={`/?panel=${a.type === "Premium" ? "premium" : "regular"}&page=schools`}
+                      href={workspaceLink(ctx, {
+                        panel: a.type.toLowerCase(),
+                        page: "schools",
+                        agent: a.id,
+                      })}
                     >
                       {data.schools.filter((s) => s.agent === a.id).length}{" "}
                       schools
@@ -496,6 +718,28 @@ export function Agents({ ctx }) {
                         icon="edit"
                         label={"Edit agent " + a.name}
                         onClick={() => setEdit({ ...a })}
+                      />
+                      <a
+                        className="icon-btn"
+                        aria-label={`Open account for ${a.name}`}
+                        title={`Open account for ${a.name}`}
+                        href={workspaceLink(ctx, {
+                          panel: a.type.toLowerCase(),
+                          page: "overview",
+                          agent: a.id,
+                        })}
+                      >
+                        <Icon name="external" size={16} />
+                      </a>
+                      <IconButton
+                        icon="email"
+                        label={`${a.setupAt ? "Resend" : "Send"} setup email for ${a.name}`}
+                        onClick={() => setSetup(a)}
+                      />
+                      <IconButton
+                        icon="trash"
+                        label={`Delete agent ${a.name}`}
+                        onClick={() => setRemoveAgent(a)}
                       />
                       <IconButton
                         icon="lock"
@@ -647,6 +891,32 @@ export function Agents({ ctx }) {
             </Button>
           </div>
         </Modal>
+      )}
+      {setup && (
+        <SetupAccess
+          ctx={ctx}
+          account={setup}
+          collection="agents"
+          onClose={() => setSetup(null)}
+        />
+      )}
+      {removeAgent && (
+        <DeleteAccount
+          account={removeAgent}
+          onDelete={removeAgentData}
+          onClose={() => setRemoveAgent(null)}
+        >
+          <ul>
+            <li>
+              The agent’s demo account and subscription details will be deleted.
+            </li>
+            <li>
+              {data.schools.filter((s) => s.agent === removeAgent.id).length}{" "}
+              schools will become unassigned. Their records and orders stay
+              available.
+            </li>
+          </ul>
+        </DeleteAccount>
       )}
     </>
   );
@@ -1554,8 +1824,7 @@ export function Settings({ ctx, onReset }) {
               e.preventDefault();
               update((d) => ({
                 ...d,
-                profiles: { ...d.profiles, [role]: profile },
-                ...(role === "school" ? { profile } : {}),
+                profiles: { ...d.profiles, [ctx.profileKey]: profile },
               }));
               notify("Profile saved.");
             }}

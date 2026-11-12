@@ -14,7 +14,14 @@ import {
   Empty,
   CardPreview,
 } from "../components.jsx";
-import { studentLink, uid, fmtDate, validateStudent } from "../lib.js";
+import {
+  studentLink,
+  uid,
+  fmtDate,
+  approvalError,
+  approvedStudent,
+  isNotSubmitted,
+} from "../lib.js";
 import { FIELDS } from "../data.js";
 import { StudentEditor } from "./Students.jsx";
 export function Invitations({ ctx }) {
@@ -40,6 +47,7 @@ export function Invitations({ ctx }) {
   const toSend = schoolStudents.filter(
     (s) =>
       selected.includes(s.id) &&
+      s.active &&
       s.email &&
       !["In review", "Approved", "Submitted for print"].includes(s.status),
   );
@@ -50,7 +58,9 @@ export function Invitations({ ctx }) {
         : [...selected, id],
     );
   const selectable = rows.filter(
-    (s) => !["In review", "Approved", "Submitted for print"].includes(s.status),
+    (s) =>
+      s.email &&
+      !["In review", "Approved", "Submitted for print"].includes(s.status),
   );
   const all =
     selectable.length > 0 && selectable.every((s) => selected.includes(s.id));
@@ -217,11 +227,14 @@ export function Invitations({ ctx }) {
                     <input
                       type="checkbox"
                       aria-label={"Invite " + s.name}
-                      disabled={[
-                        "In review",
-                        "Approved",
-                        "Submitted for print",
-                      ].includes(s.status)}
+                      disabled={
+                        !s.email ||
+                        [
+                          "In review",
+                          "Approved",
+                          "Submitted for print",
+                        ].includes(s.status)
+                      }
                       checked={selected.includes(s.id)}
                       onChange={() => toggle(s.id)}
                     />
@@ -238,7 +251,9 @@ export function Invitations({ ctx }) {
                   <td data-label="CLASS">
                     {s.classNo} – {s.section}
                   </td>
-                  <td data-label="EMAIL ADDRESS">{s.email}</td>
+                  <td data-label="EMAIL ADDRESS">
+                    {s.email || "Email needed to send"}
+                  </td>
                   <td data-label="STATUS">
                     <Badge>{s.status}</Badge>
                   </td>
@@ -438,49 +453,45 @@ export function ReviewQueue({ ctx }) {
     availableSchools,
     setSchoolId,
   } = ctx;
-  const [tab, setTab] = useState("In review"),
+  const [tab, setTab] = useState(() => {
+      const record = schoolStudents.find((s) => s.id === ctx.reviewRecord);
+      if (!record) return "In review";
+      return isNotSubmitted(record) ? "Not submitted" : record.status;
+    }),
     [query, setQuery] = useState(""),
     [chosen, setChosen] = useState(ctx.phoneView ? ctx.reviewRecord : null),
     [reason, setReason] = useState(""),
     [edit, setEdit] = useState(null),
     [rejection, setRejection] = useState(false);
+  const canReview = ["school", "super"].includes(role);
+  const matchesTab = (student, value) =>
+    value === "Not submitted"
+      ? isNotSubmitted(student)
+      : student.status === value;
   const list = schoolStudents.filter(
     (s) =>
-      s.status === tab &&
+      matchesTab(s, tab) &&
       `${s.name} ${s.admission}`.toLowerCase().includes(query.toLowerCase()),
   );
-  const current = chosen ? data.students.find((s) => s.id === chosen) : list[0];
+  const current = chosen ? list.find((s) => s.id === chosen) : list[0];
   const phoneDetail =
     ctx.phoneView && list.some((student) => student.id === chosen);
   const approve = () => {
-    if (!current) return;
+    if (!current || !canReview) return;
     const fields = FIELDS.filter((f) =>
       (data.fieldScope[school.id] || data.enabledFields).includes(f[0]),
     );
-    if (
-      !current.photo ||
-      Object.keys(validateStudent(current, fields)).length
-    ) {
-      notify(
-        "Complete the required ID fields and add a photo before approving.",
-        "error",
-      );
+    const error = approvalError(current, fields);
+    if (error) {
+      notify(error, "error");
       return;
     }
+    const approved = approvedStudent(current);
     update((d) =>
       log(
         {
           ...d,
-          students: d.students.map((s) =>
-            s.id === current.id
-              ? {
-                  ...s,
-                  status: "Approved",
-                  note: "",
-                  approvedAt: new Date().toISOString(),
-                }
-              : s,
-          ),
+          students: d.students.map((s) => (s.id === current.id ? approved : s)),
         },
         `School approved ${current.name} for printing`,
         "review",
@@ -490,6 +501,8 @@ export function ReviewQueue({ ctx }) {
     notify(`${current.name} is approved and ready for printing.`);
   };
   const request = () => {
+    if (!canReview || !current || isNotSubmitted(current) || !reason.trim())
+      return;
     update((d) =>
       log(
         {
@@ -540,20 +553,31 @@ export function ReviewQueue({ ctx }) {
         </div>
       )}
       <div className="review-tabs">
-        {["In review", "Approved", "Changes requested"].map((t) => (
-          <button
-            className={t === tab ? "active" : ""}
-            key={t}
-            onClick={() => {
-              setTab(t);
-              setChosen(null);
-            }}
-          >
-            {t}
-            <span>{schoolStudents.filter((s) => s.status === t).length}</span>
-          </button>
-        ))}
+        {["In review", "Not submitted", "Approved", "Changes requested"].map(
+          (t) => (
+            <button
+              className={t === tab ? "active" : ""}
+              key={t}
+              onClick={() => {
+                setTab(t);
+                setChosen(null);
+              }}
+            >
+              {t}
+              <span>
+                {schoolStudents.filter((s) => matchesTab(s, t)).length}
+              </span>
+            </button>
+          ),
+        )}
       </div>
+      {tab === "Not submitted" && (
+        <Callout icon="review">
+          Open a draft or invited student to add any missing details and a
+          photo. School admins can approve the card here or in the student
+          directory.
+        </Callout>
+      )}
       <div
         className={`review-layout ${phoneDetail ? "phone-review-detail" : "phone-review-list"}`}
       >
@@ -562,7 +586,7 @@ export function ReviewQueue({ ctx }) {
             <SearchBox
               value={query}
               onChange={setQuery}
-              placeholder="Find a submission"
+              placeholder="Find a student"
             />
           </div>
           {list.map((s) => (
@@ -586,10 +610,7 @@ export function ReviewQueue({ ctx }) {
             </button>
           ))}
           {!list.length && (
-            <Empty
-              title="All clear here"
-              text="No submissions match this view."
-            />
+            <Empty title="All clear here" text="No students match this view." />
           )}
         </Panel>
         <Panel className="review-detail">
@@ -638,7 +659,9 @@ export function ReviewQueue({ ctx }) {
                       <p>
                         {current.captureAt
                           ? new Date(current.captureAt).toLocaleString()
-                          : "Illustration used for this preview"}
+                          : current.photo
+                            ? current.photoSource || "Sample photo"
+                            : "No photo added"}
                       </p>
                     </div>
                     <Badge
@@ -711,22 +734,26 @@ export function ReviewQueue({ ctx }) {
                   </div>
                 ) : (
                   <div className="review-actions">
-                    <Button
-                      variant="secondary"
-                      icon="edit"
-                      onClick={() => setEdit(current)}
-                    >
-                      Edit manually
-                    </Button>
-                    {current.status !== "Approved" && (
+                    {canReview && (
+                      <Button
+                        variant="secondary"
+                        icon="edit"
+                        onClick={() => setEdit(current)}
+                      >
+                        Edit manually
+                      </Button>
+                    )}
+                    {canReview && current.status !== "Approved" && (
                       <>
-                        <Button
-                          variant="secondary"
-                          icon="refresh"
-                          onClick={() => setRejection(true)}
-                        >
-                          Request changes
-                        </Button>
+                        {!isNotSubmitted(current) && (
+                          <Button
+                            variant="secondary"
+                            icon="refresh"
+                            onClick={() => setRejection(true)}
+                          >
+                            Request changes
+                          </Button>
+                        )}
                         <Button icon="check" onClick={approve}>
                           Approve for printing
                         </Button>
@@ -759,7 +786,14 @@ export function ReviewQueue({ ctx }) {
         </Panel>
       </div>
       {edit && (
-        <StudentEditor ctx={ctx} student={edit} onClose={() => setEdit(null)} />
+        <StudentEditor
+          ctx={ctx}
+          student={edit}
+          onClose={() => setEdit(null)}
+          onSaved={(saved) => {
+            if (saved.status === "Approved") setChosen(null);
+          }}
+        />
       )}
     </>
   );

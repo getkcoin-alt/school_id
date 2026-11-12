@@ -8,7 +8,7 @@ import {
   Badge,
   CardPreview,
 } from "../components.jsx";
-import { fmtDate } from "../lib.js";
+import { fmtDate, firstName } from "../lib.js";
 export default function Dashboard({ ctx }) {
   const { data, role, school, schoolStudents, go, availableSchools, session } =
     ctx;
@@ -105,7 +105,7 @@ export default function Dashboard({ ctx }) {
         }
         description={
           isSchool
-            ? `Welcome back, ${ctx.userProfile.name.split(" ")[0]}. Here’s where your school IDs stand.`
+            ? `Welcome back, ${firstName(ctx.userProfile.name)}. Here’s where your school IDs stand.`
             : "A clear view of your schools, photo collections, and card production."
         }
       >

@@ -8,6 +8,7 @@ import {
   Button,
   Modal,
   Badge,
+  Empty,
 } from "./components.jsx";
 import Dashboard from "./pages/Dashboard.jsx";
 import Students from "./pages/Students.jsx";
@@ -124,6 +125,7 @@ export default function App() {
   const [page, setPage] = useState(
     pageNames[initial.get("page")] ? initial.get("page") : "overview",
   );
+  const [requestedAgent, setRequestedAgent] = useState(initial.get("agent"));
   const [schoolId, setSchoolId] = useState(initial.get("school") || "SCH-001");
   const [reviewRecord, setReviewRecord] = useState(initial.get("record"));
   const [session, setSession] = useState("2026–27");
@@ -173,6 +175,9 @@ export default function App() {
   useEffect(() => {
     const u = new URL(window.location.href);
     u.searchParams.set("panel", role);
+    if (requestedAgent && ["regular", "premium"].includes(role))
+      u.searchParams.set("agent", requestedAgent);
+    else u.searchParams.delete("agent");
     if (role !== "student") {
       u.searchParams.set("page", page);
       u.searchParams.set("school", schoolId);
@@ -183,7 +188,7 @@ export default function App() {
       u.searchParams.delete("token");
     }
     window.history.replaceState({}, "", u);
-  }, [role, page, schoolId, reviewRecord]);
+  }, [role, page, schoolId, reviewRecord, requestedAgent]);
   useEffect(() => {
     const listener = (e) => {
       if (e.key === "Escape") {
@@ -195,16 +200,24 @@ export default function App() {
     window.addEventListener("keydown", listener);
     return () => window.removeEventListener("keydown", listener);
   }, []);
-  const availableSchools =
-    role === "premium"
-      ? data.schools.filter((s) => s.agent === "AG-001")
-      : role === "regular"
-        ? data.schools.filter((s) => s.agent === "AG-002")
-        : data.schools;
-  const school =
-    availableSchools.find((s) => s.id === schoolId) ||
-    availableSchools[0] ||
-    data.schools[0];
+  const isAgent = ["premium", "regular"].includes(role);
+  const defaultAgent = data.agents.find(
+    (a) =>
+      a.id === (role === "regular" ? "AG-002" : "AG-001") &&
+      a.type.toLowerCase() === role,
+  );
+  const agent = isAgent
+    ? data.agents.find(
+        (a) => a.id === requestedAgent && a.type.toLowerCase() === role,
+      ) ||
+      defaultAgent ||
+      data.agents.find((a) => a.type.toLowerCase() === role)
+    : null;
+  const availableSchools = isAgent
+    ? data.schools.filter((s) => s.agent === agent?.id && agent)
+    : data.schools;
+  const school = availableSchools.find((s) => s.id === schoolId) ||
+    availableSchools[0] || { id: "", name: "No school assigned" };
   const go = (target, record = null) => {
     if (phoneView && target !== page)
       window.history.pushState({}, "", window.location.href);
@@ -216,6 +229,7 @@ export default function App() {
     if (phoneView && id !== role)
       window.history.pushState({}, "", window.location.href);
     setRole(id);
+    setRequestedAgent(null);
     setPage("overview");
     setReviewRecord(null);
     setOpenRoles(false);
@@ -234,6 +248,7 @@ export default function App() {
       const screen = params.get("page");
       setRole(ROLES.some((entry) => entry.id === panel) ? panel : "school");
       setPage(pageNames[screen] ? screen : "overview");
+      setRequestedAgent(params.get("agent"));
       setSchoolId(params.get("school") || "SCH-001");
       setReviewRecord(params.get("record"));
       setOpenRoles(false);
@@ -243,19 +258,36 @@ export default function App() {
     window.addEventListener("popstate", restore);
     return () => window.removeEventListener("popstate", restore);
   }, []);
+  const profileKey =
+    role === "school"
+      ? `school:${school.id}`
+      : isAgent
+        ? `agent:${agent?.id || role}`
+        : role;
+  const legacyProfile =
+    (role === "school" && school.id === "SCH-001") ||
+    (isAgent && agent && agent.id === defaultAgent?.id) ||
+    role === "super"
+      ? data.profiles?.[role]
+      : null;
   const userProfile =
-    data.profiles?.[role] ||
+    data.profiles?.[profileKey] ||
+    legacyProfile ||
     (role === "school"
-      ? data.profile
+      ? school.id === "SCH-001"
+        ? data.profile
+        : {
+            name: school.principal || school.name,
+            email: school.email || "",
+            phone: school.phone || "",
+          }
       : role === "super"
         ? {
             name: "Platform Admin",
             email: "admin@idstudio.example",
             phone: "9876500999",
           }
-        : data.agents.find(
-            (a) => a.id === (role === "regular" ? "AG-002" : "AG-001"),
-          ) || data.profile);
+        : agent || { name: "Agent", email: "", phone: "" });
   const ctx = {
     data,
     update,
@@ -270,6 +302,8 @@ export default function App() {
     log,
     setSchoolId,
     userProfile,
+    profileKey,
+    agentId: agent?.id,
     phoneView,
     reviewRecord,
     design: data.schoolDesigns?.[school.id] || data.design,
@@ -363,7 +397,9 @@ export default function App() {
       content = <Sessions ctx={ctx} />;
       break;
     case "settings":
-      content = <Settings ctx={ctx} onReset={() => setReset(true)} />;
+      content = (
+        <Settings key={profileKey} ctx={ctx} onReset={() => setReset(true)} />
+      );
       break;
     case "guide":
       content = <Guide ctx={ctx} />;
@@ -372,7 +408,7 @@ export default function App() {
       content = <Activity ctx={ctx} />;
       break;
     case "photos":
-      content = <PhotoUploads ctx={ctx} />;
+      content = <PhotoUploads key={school.id} ctx={ctx} />;
       break;
     case "designs":
       content = <Designs ctx={ctx} />;
@@ -383,12 +419,27 @@ export default function App() {
     default:
       content = phoneView ? <PhoneHome ctx={ctx} /> : <Dashboard ctx={ctx} />;
   }
+  if (
+    isAgent &&
+    !school.id &&
+    ["photos", "printing", "designs"].includes(page)
+  ) {
+    content = (
+      <Empty
+        title="Add a school to get started"
+        text="Assign a school to this agent before managing photos, designs, or print batches."
+        action={<Button onClick={() => go("schools")}>Go to schools</Button>}
+      />
+    );
+  }
   const searchResults = globalSearch.trim()
     ? data.students
         .filter(
           (s) =>
             (role === "super" ||
-              availableSchools.some((sch) => sch.id === s.school)) &&
+              (role === "school"
+                ? s.school === school.id
+                : availableSchools.some((sch) => sch.id === s.school))) &&
             `${s.name} ${s.admission}`
               .toLowerCase()
               .includes(globalSearch.toLowerCase()),

@@ -22,9 +22,15 @@ import {
   download,
   parseImport,
   validateStudent,
-  eligible,
-  cardPDF,
+  isNotSubmitted,
+  approvalError,
+  approvedStudent,
+  exportStudents,
+  studentPhoto,
+  validPhoto,
 } from "../lib.js";
+import { getFile } from "../files.js";
+
 export function StudentEditor({ ctx, student, onClose, onSaved }) {
   const { data, school, update, notify, log } = ctx;
   const [draft, setDraft] = useState(
@@ -55,13 +61,18 @@ export function StudentEditor({ ctx, student, onClose, onSaved }) {
         },
   );
   const [errors, setErrors] = useState({});
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const canApprove =
+    ["school", "super"].includes(ctx.role) &&
+    draft.active &&
+    (!student || isNotSubmitted(student) || student.status === "In review");
   const keys = data.fieldScope[school.id] || data.enabledFields;
   const fields = FIELDS.filter((f) => keys.includes(f[0]));
   const change = (key, val) => {
     setDraft((d) => ({ ...d, [key]: val }));
     setErrors((e) => ({ ...e, [key]: null }));
   };
-  const save = () => {
+  const save = (approve = false) => {
     const e = validateStudent(draft, fields);
     if (
       data.students.some(
@@ -69,7 +80,7 @@ export function StudentEditor({ ctx, student, onClose, onSaved }) {
           s.id !== draft.id &&
           s.school === school.id &&
           s.session === draft.session &&
-          s.admission === draft.admission,
+          String(s.admission).trim() === draft.admission.trim(),
       )
     )
       e.admission = "This admission number already exists in this school.";
@@ -78,9 +89,14 @@ export function StudentEditor({ ctx, student, onClose, onSaved }) {
       notify("Check the highlighted fields.", "error");
       return;
     }
-    const result = {
+    if (approve && (!canApprove || approvalError(draft, fields))) {
+      notify("Add a photo before approving this student.", "error");
+      return;
+    }
+    const saved = {
       ...draft,
       name: draft.name.trim(),
+      admission: draft.admission.trim(),
       status: student
         ? ["Approved", "Submitted for print"].includes(student.status)
           ? "In review"
@@ -89,6 +105,7 @@ export function StudentEditor({ ctx, student, onClose, onSaved }) {
           ? "In review"
           : "Draft",
     };
+    const result = approve ? approvedStudent(saved) : saved;
     update((d) =>
       log(
         {
@@ -97,36 +114,39 @@ export function StudentEditor({ ctx, student, onClose, onSaved }) {
             ? d.students.map((s) => (s.id === result.id ? result : s))
             : [result, ...d.students],
         },
-        `${student ? "Updated" : "Added"} student ${result.name}`,
+        `${approve ? "Approved" : student ? "Updated" : "Added"} student ${result.name}`,
       ),
     );
     notify(
-      student
-        ? "Student updated. Changes to approved cards require a new review."
-        : "Student added to your directory.",
+      approve
+        ? `${result.name} is approved and ready for printing.`
+        : student
+          ? "Student record updated."
+          : "Student added to your directory.",
     );
     onSaved?.(result);
     onClose();
   };
-  const photo = async (e) => {
+  const loadPhoto = async (read, source) => {
+    setPhotoBusy(true);
+    try {
+      const photo = await read();
+      setDraft((d) => ({ ...d, photo, photoSource: source, captureAt: null }));
+    } catch {
+      notify("The photo could not be opened. Choose another image.", "error");
+    } finally {
+      setPhotoBusy(false);
+    }
+  };
+  const photo = (e) => {
     const file = e.target.files?.[0];
+    e.target.value = "";
     if (!file) return;
-    if (
-      !["image/jpeg", "image/png", "image/webp"].includes(file.type) ||
-      file.size > 2 * 1024 * 1024
-    ) {
-      notify("Choose a JPG, PNG, or WebP image under 2 MB.", "error");
+    if (!validPhoto(file)) {
+      notify("Choose a JPG, PNG, or WebP image up to 15 MB.", "error");
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () =>
-      setDraft((d) => ({
-        ...d,
-        photo: reader.result,
-        photoSource: "School admin upload",
-        captureAt: null,
-      }));
-    reader.readAsDataURL(file);
+    loadPhoto(() => studentPhoto(file), "School admin upload");
   };
   return (
     <Modal
@@ -150,26 +170,31 @@ export function StudentEditor({ ctx, student, onClose, onSaved }) {
                 type="file"
                 accept="image/jpeg,image/png,image/webp"
                 onChange={photo}
+                disabled={photoBusy}
               />
             </label>
-            <p>JPG, PNG, WebP · max. 2 MB · manual upload</p>
+            <p>
+              {photoBusy ? "Preparing photo…" : "JPG, PNG, WebP · up to 15 MB"}
+            </p>
           </div>
           {data.photoLibrary.filter((p) => p.school === school.id).length >
             0 && (
             <Field label="Or choose from school photos">
               <select
                 defaultValue=""
+                disabled={photoBusy}
                 onChange={(e) => {
                   const p = data.photoLibrary.find(
                     (p) => p.id === e.target.value,
                   );
+                  e.target.value = "";
                   if (p)
-                    setDraft((d) => ({
-                      ...d,
-                      photo: p.src,
-                      photoSource: "School photo library",
-                      captureAt: null,
-                    }));
+                    loadPhoto(async () => {
+                      if (p.src) return p.src;
+                      const file = await getFile(p.fileKey);
+                      if (!file) throw Error("Photo missing");
+                      return studentPhoto(file);
+                    }, "School photo library");
                 }}
               >
                 <option value="">Choose a library photo</option>
@@ -260,9 +285,19 @@ export function StudentEditor({ ctx, student, onClose, onSaved }) {
         <Button variant="secondary" onClick={onClose}>
           Cancel
         </Button>
-        <Button icon="check" onClick={save}>
+        <Button
+          variant={canApprove ? "secondary" : undefined}
+          icon="check"
+          disabled={photoBusy}
+          onClick={() => save()}
+        >
           Save student
         </Button>
+        {canApprove && (
+          <Button icon="print" disabled={photoBusy} onClick={() => save(true)}>
+            Save and approve
+          </Button>
+        )}
       </div>
     </Modal>
   );
@@ -271,11 +306,14 @@ export function ImportStudents({ ctx, onClose }) {
   const [file, setFile] = useState(null),
     [result, setResult] = useState(null),
     [busy, setBusy] = useState(false);
-  const { notify, school, data, update, log } = ctx;
+  const { notify, school, data, update, log, session } = ctx;
+  const customFields = data.customFields.filter(
+    (f) => f.school === school.id && f.audience !== "staff",
+  );
   const sample = () =>
     download(
       "student-import-template.csv",
-      'name,admission,class,section,email,phone,father,mother,address\nSample Student,NEW-001,6,A,student@example.com,9876500000,Parent Name,Parent Name,"Udaipur, Rajasthan"',
+      'name,admission,class,section,email,phone,father,mother,address,gender,dob,admissionDate,blood,transport\nSample Student,NEW-001,6,A,student@example.com,9876500000,Parent Name,Parent Name,"Udaipur, Rajasthan",,2014-08-01,2026-04-01,O+,',
       "text/csv",
     );
   const inspect = async () => {
@@ -285,10 +323,19 @@ export function ImportStudents({ ctx, onClose }) {
       if (file.size > 5 * 1024 * 1024)
         throw Error("Keep the spreadsheet under 5 MB.");
       const XLSX = await import("xlsx");
-      const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
-      const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+      const wb = XLSX.read(await file.arrayBuffer(), {
+        type: "array",
+        cellDates: true,
+        dateNF: "yyyy-mm-dd",
+      });
+      const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {
+        raw: false,
+        dateNF: "yyyy-mm-dd",
+      });
       if (rows.length > 5000) throw Error("Import up to 5,000 rows at a time.");
-      setResult(parseImport(rows, school.id, data.students));
+      setResult(
+        parseImport(rows, school.id, data.students, session, customFields),
+      );
     } catch (e) {
       notify(
         e.message || "This file could not be read. Use the provided template.",
@@ -301,14 +348,15 @@ export function ImportStudents({ ctx, onClose }) {
   return (
     <Modal
       title="Import your student list"
-      subtitle="Bring in existing school contacts. Send invitations when you’re ready."
+      subtitle={`${school.name} · ${session}`}
       onClose={onClose}
     >
       <div className="modal-body">
         <Callout>
-          Required columns: name, admission, email. Optional: class, section,
-          phone, father, mother, address. Existing admission numbers are
-          skipped.
+          Include a name and admission number for each student. Add ID details
+          now, then attach a photo and approve the card in Review → Not
+          submitted. The school’s required ID fields must be complete at
+          approval.
         </Callout>
         <Button variant="text" icon="download" onClick={sample}>
           Download sample CSV
@@ -357,20 +405,25 @@ export function ImportStudents({ ctx, onClose }) {
           <Button
             disabled={!result.students.length}
             onClick={() => {
-              const fresh = parseImport(
-                result.students.map((s) => ({ ...s, class: s.classNo })),
-                school.id,
-                data.students,
+              const admissions = new Set(
+                data.students
+                  .filter(
+                    (s) => s.school === school.id && s.session === session,
+                  )
+                  .map((s) => String(s.admission).trim()),
+              );
+              const fresh = result.students.filter(
+                (s) => !admissions.has(s.admission),
               );
               update((d) =>
                 log(
-                  { ...d, students: [...d.students, ...fresh.students] },
-                  `Imported ${fresh.students.length} student contacts`,
+                  { ...d, students: [...d.students, ...fresh] },
+                  `Imported ${fresh.length} students into ${session}`,
                   "upload",
                 ),
               );
               notify(
-                `${fresh.students.length} student contacts imported as drafts.`,
+                `${fresh.length} students imported. Open Review → Not submitted to finish their cards.`,
               );
               onClose();
             }}
@@ -390,6 +443,9 @@ export default function Students({ ctx }) {
     [status, setStatus] = useState(""),
     [tab, setTab] = useState("Active"),
     [page, setPage] = useState(1),
+    [pageSize, setPageSize] = useState(data.studentPageSize || "8"),
+    [downloads, setDownloads] = useState(false),
+    [exporting, setExporting] = useState(false),
     [selected, setSelected] = useState([]),
     [edit, setEdit] = useState(null),
     [importing, setImporting] = useState(false),
@@ -406,9 +462,11 @@ export default function Students({ ctx }) {
       (!section || s.section === section) &&
       (!status || s.status === status),
   );
-  const pages = Math.max(1, Math.ceil(filtered.length / 8));
+  const size =
+    pageSize === "all" ? Math.max(1, filtered.length) : Number(pageSize);
+  const pages = Math.max(1, Math.ceil(filtered.length / size));
   const current = Math.min(page, pages);
-  const rows = filtered.slice((current - 1) * 8, current * 8);
+  const rows = filtered.slice((current - 1) * size, current * size);
   const all = rows.length > 0 && rows.every((s) => selected.includes(s.id));
   const resetPage = (f) => {
     f();
@@ -472,9 +530,10 @@ export default function Students({ ctx }) {
           <Button
             variant="text"
             icon="download"
-            onClick={() => exportCSV(filtered)}
+            onClick={() => setDownloads(true)}
+            disabled={!filtered.length}
           >
-            Export CSV
+            Downloads
           </Button>
         </div>
         <div className="table-toolbar">
@@ -677,10 +736,25 @@ export default function Students({ ctx }) {
         )}
         <div className="pagination">
           <span>
-            Showing {rows.length ? (current - 1) * 8 + 1 : 0}–
-            {Math.min(current * 8, filtered.length)} of {filtered.length}{" "}
+            Showing {rows.length ? (current - 1) * size + 1 : 0}–
+            {Math.min(current * size, filtered.length)} of {filtered.length}{" "}
             students
           </span>
+          <select
+            aria-label="Students per page"
+            value={pageSize}
+            onChange={(e) => {
+              const value = e.target.value;
+              resetPage(() => setPageSize(value));
+              update({ studentPageSize: value });
+            }}
+          >
+            {[8, 15, 25, 50, "all"].map((value) => (
+              <option key={value} value={value}>
+                {value === "all" ? "All students" : `${value} per page`}
+              </option>
+            ))}
+          </select>
           <div>
             <Button
               variant="secondary"
@@ -704,6 +778,58 @@ export default function Students({ ctx }) {
           </div>
         </div>
       </Panel>
+      {downloads && (
+        <Modal
+          title="Download student records"
+          subtitle={`${filtered.length} students matching your filters`}
+          onClose={() => setDownloads(false)}
+        >
+          <div className="modal-body">
+            <div className="button-row">
+              {[
+                ["excel", "Excel student list"],
+                ["zip", "ZIP with photos"],
+                ["checklist", "Checking sheet PDF"],
+                ["csv", "CSV"],
+              ].map(([format, label]) => (
+                <Button
+                  key={format}
+                  variant="secondary"
+                  icon="download"
+                  disabled={exporting}
+                  onClick={async () => {
+                    setExporting(true);
+                    try {
+                      if (format === "csv") exportCSV(filtered);
+                      else
+                        await exportStudents(
+                          filtered,
+                          school,
+                          data.customFields.filter(
+                            (f) =>
+                              f.school === school.id && f.audience !== "staff",
+                          ),
+                          format,
+                        );
+                      notify(`${label} ready.`);
+                    } catch {
+                      notify(
+                        "Could not create the download. Try fewer records.",
+                        "error",
+                      );
+                    } finally {
+                      setExporting(false);
+                    }
+                  }}
+                >
+                  {label}
+                </Button>
+              ))}
+            </div>
+            {exporting && <p role="status">Preparing download…</p>}
+          </div>
+        </Modal>
+      )}
       {edit && (
         <StudentEditor
           ctx={ctx}
@@ -764,9 +890,27 @@ export default function Students({ ctx }) {
       {remove && (
         <Modal
           title={`Delete ${remove.name}?`}
-          subtitle="The student record and local submission will be removed. Existing print batches keep their history."
+          subtitle="Review the impact before deleting this student from the demo."
           onClose={() => setRemove(null)}
         >
+          <div className="modal-body">
+            <ul>
+              <li>
+                The student record, photo, and submission link will be removed.
+              </li>
+              <li>
+                {data.outbox.filter((m) => m.student === remove.id).length} demo
+                invitations will be removed.
+              </li>
+              <li>
+                {
+                  data.batches.filter((b) => b.studentIds.includes(remove.id))
+                    .length
+                }{" "}
+                print batches keep their saved history.
+              </li>
+            </ul>
+          </div>
           <div className="modal-actions">
             <Button variant="secondary" onClick={() => setRemove(null)}>
               Keep student
@@ -778,6 +922,7 @@ export default function Students({ ctx }) {
                     {
                       ...d,
                       students: d.students.filter((s) => s.id !== remove.id),
+                      outbox: d.outbox.filter((m) => m.student !== remove.id),
                     },
                     `Deleted student ${remove.name}`,
                   ),

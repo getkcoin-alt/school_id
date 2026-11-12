@@ -23,6 +23,8 @@ import {
   STAGES,
   download,
   csvText,
+  studentPhoto,
+  validPhoto,
 } from "../lib.js";
 import { getFile, putFile, deleteFile } from "../files.js";
 function PDFViewer({ file, onClose, notify }) {
@@ -99,6 +101,31 @@ function PDFViewer({ file, onClose, notify }) {
     </Modal>
   );
 }
+function LibraryPhoto({ photo }) {
+  const [src, setSrc] = useState(photo.src || "");
+  useEffect(() => {
+    if (!photo.fileKey) return;
+    let active = true;
+    let url;
+    getFile(photo.fileKey)
+      .then((file) => {
+        if (!active || !file) return;
+        url = URL.createObjectURL(file);
+        setSrc(url);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [photo.fileKey]);
+  return src ? (
+    <img loading="lazy" src={src} alt={photo.name} />
+  ) : (
+    <Icon name="image" />
+  );
+}
+
 export function PhotoUploads({ ctx }) {
   const { data, school, update, notify, log, availableSchools, role } = ctx;
   const [tab, setTab] = useState("PDF collections"),
@@ -109,6 +136,8 @@ export function PhotoUploads({ ctx }) {
     [busy, setBusy] = useState(false),
     [view, setView] = useState(null),
     [remove, setRemove] = useState(null);
+  const canUploadPDF = ["regular", "premium", "super"].includes(role);
+  const canReviewPDF = ["school", "super"].includes(role);
   const uploads = data.uploads.filter((u) => u.school === school.id);
   const images = data.photoLibrary.filter((p) => p.school === school.id);
   const choose = (f) => {
@@ -120,7 +149,7 @@ export function PhotoUploads({ ctx }) {
     setFile(f);
   };
   const upload = async () => {
-    if (!file) return;
+    if (!file || !canUploadPDF || busy) return;
     setBusy(true);
     try {
       if (
@@ -174,40 +203,42 @@ export function PhotoUploads({ ctx }) {
   };
   const bulk = async (files) => {
     const list = [...files];
-    if (list.length > 20) {
-      notify("Choose up to 20 photos at a time.", "error");
+    if (busy || !list.length) return;
+    if (list.length > 200) {
+      notify("Choose up to 200 photos at a time.", "error");
       return;
     }
+    setBusy(true);
     let skipped = 0;
     const results = [];
-    for (const f of list) {
-      if (
-        !["image/jpeg", "image/png", "image/webp"].includes(f.type) ||
-        f.size > 500 * 1024 ||
-        data.photoLibrary.some(
-          (p) => p.school === school.id && p.name === f.name,
-        ) ||
-        results.some((p) => p.name === f.name)
-      ) {
+    const names = new Set(images.map((photo) => photo.name));
+    for (const file of list) {
+      if (!validPhoto(file) || names.has(file.name)) {
         skipped++;
         continue;
       }
-      const src = await new Promise((r) => {
-        const reader = new FileReader();
-        reader.onload = () => r(reader.result);
-        reader.readAsDataURL(f);
-      });
-      results.push({ id: uid("IMG"), school: school.id, name: f.name, src });
+      try {
+        const id = uid("IMG");
+        const preview = await studentPhoto(file);
+        await putFile(id, await (await fetch(preview)).blob());
+        results.push({ id, school: school.id, name: file.name, fileKey: id });
+        names.add(file.name);
+      } catch {
+        skipped++;
+      }
     }
-    update((d) =>
-      log(
-        { ...d, photoLibrary: [...d.photoLibrary, ...results] },
-        `Added ${results.length} photos to ${school.name}`,
-        "image",
-      ),
-    );
+    if (results.length)
+      update((d) =>
+        log(
+          { ...d, photoLibrary: [...d.photoLibrary, ...results] },
+          `Added ${results.length} photos to ${school.name}`,
+          "image",
+        ),
+      );
+    setBusy(false);
     notify(
-      `${results.length} photos added${skipped ? `; ${skipped} duplicate, oversized, or unsupported files skipped` : ""}.`,
+      `${results.length} photos added${skipped ? ` · ${skipped} duplicate, oversized, or unreadable files skipped` : ""}.`,
+      results.length ? "success" : "error",
     );
   };
   return (
@@ -226,7 +257,14 @@ export function PhotoUploads({ ctx }) {
           <select
             aria-label="School for photo uploads"
             value={school.id}
-            onChange={(e) => ctx.setSchoolId(e.target.value)}
+            disabled={busy || role === "school"}
+            onChange={(e) => {
+              ctx.setSchoolId(e.target.value);
+              setFile(null);
+              setNote("");
+              setClass("");
+              setPages("1");
+            }}
           >
             {availableSchools.map((s) => (
               <option key={s.id} value={s.id}>
@@ -253,123 +291,130 @@ export function PhotoUploads({ ctx }) {
       </div>
       {tab === "PDF collections" ? (
         <>
-          <div className="upload-grid">
-            <Panel
-              title="Upload a photo PDF"
-              subtitle="Keep one school’s photos together in a document."
-            >
-              <div className="padded">
-                <label
-                  className={`dropzone ${file ? "has-file" : ""}`}
-                  onDragOver={(e) => e.preventDefault()}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    choose(e.dataTransfer.files[0]);
-                  }}
-                >
-                  <span className="upload-circle">
-                    <Icon name={file ? "file" : "upload"} size={25} />
-                  </span>
-                  <strong>
-                    {file ? file.name : "Drop your school photo PDF here"}
-                  </strong>
-                  <span>
-                    {file
-                      ? `${(file.size / 1024).toFixed(0)} KB · Ready to add`
-                      : "or click to choose a file · PDF up to 10 MB"}
-                  </span>
-                  <input
-                    type="file"
-                    accept="application/pdf,.pdf"
-                    onChange={(e) => choose(e.target.files?.[0])}
-                  />
-                </label>
-                <div className="form-grid">
-                  <Field label="Class (optional)">
-                    <select
-                      value={classNo}
-                      onChange={(e) => setClass(e.target.value)}
-                    >
-                      <option value="">All classes</option>
-                      {data.classes.map((c) => (
-                        <option key={c}>{c}</option>
-                      ))}
-                    </select>
-                  </Field>
-                  <Field
-                    label="Number of pages"
-                    hint="Enter the page count shown in your PDF."
+          {canUploadPDF ? (
+            <div className="upload-grid">
+              <Panel
+                title="Upload a photo PDF"
+                subtitle="Keep one school’s photos together in a document."
+              >
+                <div className="padded">
+                  <label
+                    className={`dropzone ${file ? "has-file" : ""}`}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      choose(e.dataTransfer.files[0]);
+                    }}
                   >
+                    <span className="upload-circle">
+                      <Icon name={file ? "file" : "upload"} size={25} />
+                    </span>
+                    <strong>
+                      {file ? file.name : "Drop your school photo PDF here"}
+                    </strong>
+                    <span>
+                      {file
+                        ? `${(file.size / 1024).toFixed(0)} KB · Ready to add`
+                        : "or click to choose a file · PDF up to 10 MB"}
+                    </span>
                     <input
-                      type="number"
-                      min="1"
-                      max="1000"
-                      value={pages}
-                      onChange={(e) => setPages(e.target.value)}
+                      type="file"
+                      accept="application/pdf,.pdf"
+                      onChange={(e) => choose(e.target.files?.[0])}
                     />
-                  </Field>
-                  <Field label="Collection notes" className="span-two">
-                    <textarea
-                      rows="2"
-                      value={note}
-                      onChange={(e) => setNote(e.target.value)}
-                      placeholder="e.g. Class 6 portraits, ordered by admission number"
-                    />
-                  </Field>
-                </div>
-                <div className="button-row">
-                  <Button
-                    icon={busy ? "loader" : "upload"}
-                    disabled={!file || busy || +pages < 1 || +pages > 1000}
-                    onClick={upload}
-                  >
-                    {busy ? "Saving PDF…" : "Upload for this school"}
-                  </Button>
-                  {file && (
-                    <Button variant="text" onClick={() => setFile(null)}>
-                      Clear file
+                  </label>
+                  <div className="form-grid">
+                    <Field label="Class (optional)">
+                      <select
+                        value={classNo}
+                        onChange={(e) => setClass(e.target.value)}
+                      >
+                        <option value="">All classes</option>
+                        {data.classes.map((c) => (
+                          <option key={c}>{c}</option>
+                        ))}
+                      </select>
+                    </Field>
+                    <Field
+                      label="Number of pages"
+                      hint="Enter the page count shown in your PDF."
+                    >
+                      <input
+                        type="number"
+                        min="1"
+                        max="1000"
+                        value={pages}
+                        onChange={(e) => setPages(e.target.value)}
+                      />
+                    </Field>
+                    <Field label="Collection notes" className="span-two">
+                      <textarea
+                        rows="2"
+                        value={note}
+                        onChange={(e) => setNote(e.target.value)}
+                        placeholder="e.g. Class 6 portraits, ordered by admission number"
+                      />
+                    </Field>
+                  </div>
+                  <div className="button-row">
+                    <Button
+                      icon={busy ? "loader" : "upload"}
+                      disabled={!file || busy || +pages < 1 || +pages > 1000}
+                      onClick={upload}
+                    >
+                      {busy ? "Saving PDF…" : "Upload for this school"}
                     </Button>
-                  )}
-                </div>
-              </div>
-            </Panel>
-            <div className="upload-guide">
-              <span className="eyebrow">A BETTER HANDOFF</span>
-              <h2>
-                A little preparation.
-                <br />A much clearer picture.
-              </h2>
-              {[
-                [
-                  "01",
-                  "One school per PDF",
-                  "Select the school first. Avoid mixing photos across schools.",
-                ],
-                [
-                  "02",
-                  "Make photos easy to match",
-                  "Label each portrait with the admission number or student name.",
-                ],
-                [
-                  "03",
-                  "Keep the school in control",
-                  "The school reviews the collection before cards enter printing.",
-                ],
-              ].map(([n, t, p]) => (
-                <div key={n}>
-                  <span>{n}</span>
-                  <div>
-                    <strong>{t}</strong>
-                    <p>{p}</p>
+                    {file && (
+                      <Button variant="text" onClick={() => setFile(null)}>
+                        Clear file
+                      </Button>
+                    )}
                   </div>
                 </div>
-              ))}
-              <Callout icon="help">
-                PDFs are stored in this browser only. Extraction, automatic
-                photo matching, and server uploads are not connected.
-              </Callout>
+              </Panel>
+              <div className="upload-guide">
+                <span className="eyebrow">A BETTER HANDOFF</span>
+                <h2>
+                  A little preparation.
+                  <br />A much clearer picture.
+                </h2>
+                {[
+                  [
+                    "01",
+                    "One school per PDF",
+                    "Select the school first. Avoid mixing photos across schools.",
+                  ],
+                  [
+                    "02",
+                    "Make photos easy to match",
+                    "Label each portrait with the admission number or student name.",
+                  ],
+                  [
+                    "03",
+                    "Keep the school in control",
+                    "The school reviews the collection before cards enter printing.",
+                  ],
+                ].map(([n, t, p]) => (
+                  <div key={n}>
+                    <span>{n}</span>
+                    <div>
+                      <strong>{t}</strong>
+                      <p>{p}</p>
+                    </div>
+                  </div>
+                ))}
+                <Callout icon="help">
+                  PDFs are stored in this browser only. Extraction, automatic
+                  photo matching, and server uploads are not connected.
+                </Callout>
+              </div>
             </div>
-          </div>
+          ) : (
+            <Callout icon="file">
+              Your agent uploads school photo PDFs. Open each collection below
+              and mark it reviewed after checking the photos.
+            </Callout>
+          )}
           <Panel
             title="School photo collections"
             subtitle={`${uploads.length} PDF collections for ${school.name}`}
@@ -402,7 +447,9 @@ export function PhotoUploads({ ctx }) {
                       <td data-label="PAGES">{u.pages}</td>
                       <td data-label="ADDED">{fmtDate(u.date)}</td>
                       <td data-label="STATUS">
-                        <Badge>{u.status}</Badge>
+                        <Badge>
+                          {u.status === "Approved" ? "Reviewed" : u.status}
+                        </Badge>
                       </td>
                       <td className="phone-record-actions">
                         <div className="row-actions">
@@ -411,28 +458,36 @@ export function PhotoUploads({ ctx }) {
                             label={"Preview " + u.name}
                             onClick={() => setView(u)}
                           />
-                          <IconButton
-                            icon="check"
-                            label={"Mark reviewed " + u.name}
-                            onClick={() => {
-                              update((d) => ({
-                                ...d,
-                                uploads: d.uploads.map((x) =>
-                                  x.id === u.id
-                                    ? { ...x, status: "Approved" }
-                                    : x,
-                                ),
-                              }));
-                              notify(
-                                "Photo collection marked reviewed. Student cards still need individual approval.",
-                              );
-                            }}
-                          />
-                          <IconButton
-                            icon="trash"
-                            label={"Delete " + u.name}
-                            onClick={() => setRemove(u)}
-                          />
+                          {canReviewPDF && u.status === "Ready for review" && (
+                            <IconButton
+                              icon="check"
+                              label={"Mark reviewed " + u.name}
+                              onClick={() => {
+                                update((d) => ({
+                                  ...d,
+                                  uploads: d.uploads.map((x) =>
+                                    x.id === u.id
+                                      ? {
+                                          ...x,
+                                          status: "Reviewed",
+                                          reviewedAt: new Date().toISOString(),
+                                        }
+                                      : x,
+                                  ),
+                                }));
+                                notify(
+                                  "Photo collection marked reviewed. Student cards still need individual approval.",
+                                );
+                              }}
+                            />
+                          )}
+                          {canUploadPDF && (
+                            <IconButton
+                              icon="trash"
+                              label={"Delete " + u.name}
+                              onClick={() => setRemove(u)}
+                            />
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -443,7 +498,11 @@ export function PhotoUploads({ ctx }) {
             {!uploads.length && (
               <Empty
                 title="No PDFs for this school yet"
-                text="Your first photo collection starts above."
+                text={
+                  canUploadPDF
+                    ? "Upload your first collection above."
+                    : "Collections from your agent will appear here."
+                }
               />
             )}
           </Panel>
@@ -457,26 +516,41 @@ export function PhotoUploads({ ctx }) {
             <div className="padded">
               <label className="dropzone">
                 <Icon name="image" size={30} />
-                <strong>Add individual photos</strong>
+                <strong>
+                  {busy ? "Saving photos…" : "Add individual photos"}
+                </strong>
                 <span>
-                  JPG, PNG, WebP · up to 500 KB each · 20 files at a time
+                  JPG, PNG, WebP · up to 15 MB each · 200 files at a time
                 </span>
                 <input
                   type="file"
                   multiple
                   accept="image/png,image/jpeg,image/webp"
-                  onChange={(e) => bulk(e.target.files || [])}
+                  disabled={busy}
+                  onChange={(e) => {
+                    bulk(e.target.files || []);
+                    e.target.value = "";
+                  }}
                 />
               </label>
               <div className="photo-library">
                 {images.map((p) => (
                   <div key={p.id}>
-                    <img src={p.src} alt={p.name} />
+                    <LibraryPhoto photo={p} />
                     <strong>{p.name}</strong>
                     <IconButton
                       icon="trash"
                       label={"Remove " + p.name}
-                      onClick={() => {
+                      onClick={async () => {
+                        try {
+                          if (p.fileKey) await deleteFile(p.fileKey);
+                        } catch {
+                          notify(
+                            "Could not remove the photo. Try again.",
+                            "error",
+                          );
+                          return;
+                        }
                         update((d) => ({
                           ...d,
                           photoLibrary: d.photoLibrary.filter(
@@ -824,6 +898,195 @@ export function Designs({ ctx }) {
     </>
   );
 }
+function OrderForms({ ctx, batches }) {
+  const { data, school, update, log, notify } = ctx;
+  const [open, setOpen] = useState(false);
+  const [file, setFile] = useState(null);
+  const [batch, setBatch] = useState("");
+  const [note, setNote] = useState("");
+  const [saving, setSaving] = useState(false);
+  const forms = (data.orderForms || []).filter(
+    (form) => form.school === school.id,
+  );
+  const close = () => {
+    setOpen(false);
+    setFile(null);
+    setBatch("");
+    setNote("");
+  };
+  const save = async (event) => {
+    event.preventDefault();
+    if (!file || saving) return;
+    if (
+      !/\.(pdf|jpe?g|png|webp|xlsx?|docx?)$/i.test(file.name) ||
+      !file.size ||
+      file.size > 15 * 1024 * 1024
+    ) {
+      notify("Choose a PDF, image, Excel, or Word file up to 15 MB.", "error");
+      return;
+    }
+    setSaving(true);
+    try {
+      const id = uid("FORM");
+      await putFile(id, file);
+      const form = {
+        id,
+        school: school.id,
+        name: file.name,
+        fileKey: id,
+        batch,
+        note: note.trim(),
+        date: new Date().toISOString(),
+      };
+      update((d) =>
+        log(
+          { ...d, orderForms: [form, ...(d.orderForms || [])] },
+          `Attached order form ${file.name}`,
+          "print",
+        ),
+      );
+      close();
+      notify("Print order form saved.");
+    } catch {
+      notify("Could not save this order form. Try again.", "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+  const getForm = async (form) => {
+    try {
+      const attachment = await getFile(form.fileKey);
+      if (!attachment) throw Error("File missing");
+      download(form.name, attachment, attachment.type);
+    } catch {
+      notify("This attachment is unavailable in this browser.", "error");
+    }
+  };
+  return (
+    <Panel
+      title="Print order forms"
+      subtitle={school.name}
+      action={
+        <Button variant="secondary" icon="upload" onClick={() => setOpen(true)}>
+          Attach order form
+        </Button>
+      }
+    >
+      {ctx.role !== "school" && ctx.availableSchools.length > 1 && (
+        <div className="padded">
+          <Field label="School for order forms">
+            <select
+              value={school.id}
+              onChange={(e) => ctx.setSchoolId(e.target.value)}
+            >
+              {ctx.availableSchools.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </div>
+      )}
+      {forms.length ? (
+        <div className="table-wrap">
+          <table className="phone-records">
+            <thead>
+              <tr>
+                <th>ATTACHMENT</th>
+                <th>BATCH</th>
+                <th>ADDED</th>
+                <th>ACTIONS</th>
+              </tr>
+            </thead>
+            <tbody>
+              {forms.map((form) => (
+                <tr key={form.id}>
+                  <td className="phone-record-title">
+                    <strong>{form.name}</strong>
+                    {form.note && (
+                      <small className="block muted">{form.note}</small>
+                    )}
+                  </td>
+                  <td data-label="BATCH">
+                    {batches.find((b) => b.id === form.batch)?.name ||
+                      "Unlinked"}
+                  </td>
+                  <td data-label="ADDED">{fmtDate(form.date)}</td>
+                  <td className="phone-record-actions">
+                    <IconButton
+                      icon="download"
+                      label={`Download ${form.name}`}
+                      onClick={() => getForm(form)}
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <Empty
+          title="No order forms yet"
+          text="Attach a PDF, image, Excel, or Word file. You can link it to a print batch."
+        />
+      )}
+      {open && (
+        <Modal
+          title="Attach a print order form"
+          subtitle={school.name}
+          onClose={saving ? undefined : close}
+        >
+          <form onSubmit={save}>
+            <div className="modal-body">
+              <Field
+                label="Order form file"
+                required
+                hint="PDF, JPG, PNG, WebP, Excel, or Word · up to 15 MB"
+              >
+                <input
+                  type="file"
+                  required
+                  accept=".pdf,.jpg,.jpeg,.png,.webp,.xls,.xlsx,.doc,.docx"
+                  onChange={(e) => setFile(e.target.files[0])}
+                />
+              </Field>
+              <Field label="Print batch (optional)">
+                <select
+                  value={batch}
+                  onChange={(e) => setBatch(e.target.value)}
+                >
+                  <option value="">No batch selected</option>
+                  {batches.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Notes (optional)">
+                <textarea
+                  rows="3"
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                />
+              </Field>
+            </div>
+            <div className="modal-actions">
+              <Button variant="secondary" disabled={saving} onClick={close}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={!file || saving} icon="upload">
+                {saving ? "Saving…" : "Save order form"}
+              </Button>
+            </div>
+          </form>
+        </Modal>
+      )}
+    </Panel>
+  );
+}
+
 export function PrintOrders({ ctx }) {
   const {
     data,
@@ -842,6 +1105,7 @@ export function PrintOrders({ ctx }) {
     [selected, setSelected] = useState([]),
     [staffIds, setStaffIds] = useState([]),
     [detail, setDetail] = useState(null),
+    [removeBatch, setRemoveBatch] = useState(null),
     [nextStatus, setNextStatus] = useState(""),
     [tracking, setTracking] = useState(""),
     [carrier, setCarrier] = useState("");
@@ -893,7 +1157,7 @@ export function PrintOrders({ ctx }) {
           ),
           staff: d.staff.map((s) =>
             chosenStaff.some((x) => x.id === s.id)
-              ? { ...s, printStatus: "Submitted for print" }
+              ? { ...s, printStatus: "Submitted for print", batch: batch.id }
               : s,
           ),
         },
@@ -906,6 +1170,53 @@ export function PrintOrders({ ctx }) {
     setStaffIds([]);
     setName("");
     notify(`${batch.count} cards submitted as a new print batch.`);
+  };
+  const deleteBatch = () => {
+    const batch = removeBatch;
+    if (
+      !batch ||
+      (role !== "super" && !["In progress", "Cancelled"].includes(batch.status))
+    )
+      return;
+    update((d) =>
+      log(
+        {
+          ...d,
+          batches: d.batches.filter((b) => b.id !== batch.id),
+          orderForms: (d.orderForms || []).map((form) =>
+            form.batch === batch.id ? { ...form, batch: "" } : form,
+          ),
+          students: d.students.map((s) =>
+            s.batch === batch.id
+              ? {
+                  ...s,
+                  batch: "",
+                  status:
+                    s.status === "Submitted for print" ? "Approved" : s.status,
+                }
+              : s,
+          ),
+          staff: d.staff.map((s) => {
+            if (s.printStatus !== "Submitted for print") return s;
+            const inOtherBatch = d.batches.some(
+              (b) => b.id !== batch.id && b.staffIds?.includes(s.id),
+            );
+            if (
+              s.batch === batch.id ||
+              (!s.batch && !inOtherBatch && batch.staffIds?.includes(s.id))
+            )
+              return { ...s, batch: "", printStatus: "Approved" };
+            return s;
+          }),
+        },
+        `Deleted print batch ${batch.name}`,
+        "print",
+      ),
+    );
+    setRemoveBatch(null);
+    notify(
+      "Print batch deleted. Cards in its print queue are ready for a new batch.",
+    );
   };
   const visibleBatches = batches.filter(
     (b) =>
@@ -1095,6 +1406,14 @@ export function PrintOrders({ ctx }) {
                           exportBatch(b);
                         }}
                       />
+                      {(role === "super" ||
+                        ["In progress", "Cancelled"].includes(b.status)) && (
+                        <IconButton
+                          icon="trash"
+                          label={`Delete batch ${b.id}`}
+                          onClick={() => setRemoveBatch(b)}
+                        />
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -1109,6 +1428,44 @@ export function PrintOrders({ ctx }) {
           />
         )}
       </Panel>
+      <OrderForms
+        key={school.id}
+        ctx={ctx}
+        batches={batches.filter((b) => b.school === school.id)}
+      />
+      {removeBatch && (
+        <Modal
+          title={`Delete ${removeBatch.name}?`}
+          subtitle="Review the impact before deleting this print batch."
+          onClose={() => setRemoveBatch(null)}
+        >
+          <div className="modal-body">
+            <ul>
+              <li>
+                The batch and its saved history of {removeBatch.count} cards
+                will be removed.
+              </li>
+              <li>
+                Linked cards still in the print queue will return to Approved.
+              </li>
+              <li>
+                {
+                  (data.orderForms || []).filter(
+                    (form) => form.batch === removeBatch.id,
+                  ).length
+                }{" "}
+                linked order forms will stay under the school.
+              </li>
+            </ul>
+          </div>
+          <div className="modal-actions">
+            <Button variant="secondary" onClick={() => setRemoveBatch(null)}>
+              Keep batch
+            </Button>
+            <Button onClick={deleteBatch}>Delete batch</Button>
+          </div>
+        </Modal>
+      )}
       <Callout icon="shield">
         Only approved, active records with photos can enter a new batch. Editing
         an approved student returns the record to review. Printed output in this

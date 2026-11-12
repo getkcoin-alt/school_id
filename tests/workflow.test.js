@@ -1,7 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createSeed, FIELDS, ROLES } from "../src/data.js";
-import { parseImport, validateStudent, eligible, csvText } from "../src/lib.js";
+import {
+  parseImport,
+  validateStudent,
+  eligible,
+  csvText,
+  approvalError,
+  approvedStudent,
+  isNotSubmitted,
+} from "../src/lib.js";
 test("the preview has no Teacher panel and preserves the two agent tiers", () => {
   assert.deepEqual(
     ROLES.map((r) => r.id),
@@ -82,4 +90,48 @@ test("new demo state is independent and all records belong to known schools", ()
   assert.notEqual(a.students[0].name, b.students[0].name);
   const schools = new Set(b.schools.map((s) => s.id));
   assert.ok(b.students.every((s) => schools.has(s.school)));
+});
+
+test("Excel drafts in another session retain their ID details and can go directly to print approval", () => {
+  const seed = createSeed();
+  const record = seed.students[0];
+  const { students, duplicates } = parseImport(
+    [
+      {
+        "Full name": record.name,
+        "Admission number": record.admission,
+        Class: record.classNo,
+        Section: record.section,
+        "Father’s name": record.father,
+        "Mother’s name": record.mother,
+        "Contact number": record.phone,
+        "Email address": record.email,
+        "Residential address": record.address,
+        "Date of birth": record.dob,
+        "Blood group": "O-",
+        "Bus stop": "Central Square",
+      },
+    ],
+    record.school,
+    seed.students,
+    "2025–26",
+    [{ id: "bus", name: "Bus stop" }],
+  );
+  assert.equal(duplicates, 0);
+  const [draft] = students;
+  assert.equal(draft.session, "2025–26");
+  assert.equal(draft.dob, record.dob);
+  assert.equal(draft.blood, "O−");
+  assert.equal(draft.custom.bus, "Central Square");
+  assert.ok(isNotSubmitted(draft));
+  assert.match(approvalError(draft, FIELDS), /add a photo/);
+  const withPhoto = { ...draft, photo: record.photo };
+  assert.equal(approvalError(withPhoto, FIELDS), "");
+  assert.match(
+    approvalError({ ...withPhoto, active: false }, FIELDS),
+    /Activate/,
+  );
+  const approved = approvedStudent(withPhoto);
+  assert.ok(eligible(approved));
+  assert.equal(approved.invitedAt, undefined);
 });

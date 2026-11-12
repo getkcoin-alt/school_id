@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Avatar, Badge, Button, Icon, Modal } from "./components.jsx";
 import { ROLES } from "./data.js";
-import { eligible } from "./lib.js";
+import { eligible, firstName, isNotSubmitted } from "./lib.js";
 import { ImportStudents } from "./pages/Students.jsx";
 
 const homeTab = ["overview", "Home", "dashboard"];
@@ -234,13 +234,14 @@ export function PhoneHome({ ctx }) {
     (student) => student.status === "In review",
   );
   const approved = schoolStudents.filter(eligible).length;
+  const waiting = schoolStudents.filter(isNotSubmitted).length;
   const batches = data.batches.filter((batch) =>
     availableSchools.some((item) => item.id === batch.school),
   );
   const stats = schoolAdmin
     ? [
         ["students", "Students", schoolStudents.length, "students"],
-        ["review", "In review", forReview.length, "review"],
+        ["review", "To review", forReview.length + waiting, "review"],
         ["print", "Ready to print", approved, "printing"],
       ]
     : [
@@ -259,8 +260,9 @@ export function PhoneHome({ ctx }) {
     ? [
         ["send", "Invite students", () => go("invitations")],
         ["upload", "Import Excel", () => setImporting(true)],
-        ["review", "Review submissions", () => go("review")],
+        ["review", "Review students", () => go("review")],
         ["print", "Print batches", () => go("printing")],
+        ["fileUp", "Review photo PDFs", () => go("photos")],
       ]
     : [
         ["school", "Manage schools", () => go("schools")],
@@ -291,7 +293,7 @@ export function PhoneHome({ ctx }) {
             ))}
           </select>
         </div>
-        <h1 id="phone-home-title">Hello, {userProfile.name.split(" ")[0]}.</h1>
+        <h1 id="phone-home-title">Hello, {firstName(userProfile.name)}.</h1>
         <p>School ID workspace</p>
         <div className="phone-stats">
           {stats.map(([icon, label, count, target]) => (

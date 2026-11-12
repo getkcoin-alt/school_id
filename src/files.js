@@ -32,11 +32,16 @@ export async function getFile(key) {
     t.oncomplete = () => db.close();
   });
 }
-export async function deleteFile(key) {
+export function deleteFile(key) {
+  return deleteFiles([key]);
+}
+export async function deleteFiles(keys) {
+  if (!keys.length) return;
   const db = await open();
   return new Promise((resolve, reject) => {
     const t = db.transaction("files", "readwrite");
-    t.objectStore("files").delete(key);
+    const files = t.objectStore("files");
+    for (const key of keys) files.delete(key);
     t.oncomplete = () => {
       db.close();
       resolve();

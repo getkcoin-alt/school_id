@@ -183,6 +183,7 @@ export function Badge({ children, tone }) {
     Delivered: "green",
     Active: "green",
     "In review": "amber",
+    Reviewed: "green",
     "Ready for review": "amber",
     "In progress": "blue",
     Printed: "purple",
@@ -316,7 +317,7 @@ export function Modal({ title, subtitle, children, onClose, wide = false }) {
       ].filter((n) => !n.disabled && n.getClientRects().length);
     nodes()[0]?.focus();
     const key = (e) => {
-      if (e.key === "Escape") closeRef.current();
+      if (e.key === "Escape") closeRef.current?.();
       if (e.key === "Tab") {
         const a = nodes(),
           first = a[0],
@@ -341,7 +342,7 @@ export function Modal({ title, subtitle, children, onClose, wide = false }) {
     <div
       className="modal-overlay"
       onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        if (e.target === e.currentTarget) onClose?.();
       }}
     >
       <div
@@ -356,7 +357,12 @@ export function Modal({ title, subtitle, children, onClose, wide = false }) {
             <h2>{title}</h2>
             {subtitle && <p>{subtitle}</p>}
           </div>
-          <IconButton icon="x" label="Close dialog" onClick={onClose} />
+          <IconButton
+            icon="x"
+            label="Close dialog"
+            onClick={onClose}
+            disabled={!onClose}
+          />
         </div>
         {children}
       </div>

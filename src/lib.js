@@ -1,4 +1,4 @@
-import { createSeed, STORAGE_KEY } from "./data.js";
+import { createSeed, FIELDS, STORAGE_KEY } from "./data.js";
 export function loadData() {
   try {
     const d = JSON.parse(localStorage.getItem(STORAGE_KEY));
@@ -24,6 +24,13 @@ export const initials = (name = "") =>
     .slice(0, 2)
     .map((n) => n[0])
     .join("");
+export const firstName = (name = "") =>
+  name
+    .trim()
+    .split(/\s+/)
+    .find(
+      (part) => part && !/^(mr|mrs|ms|miss|dr|prof|shri|smt)\.?$/i.test(part),
+    ) || "there";
 export const fmtDate = (d) =>
   new Date(d).toLocaleDateString("en-IN", {
     day: "numeric",
@@ -104,28 +111,56 @@ export function validateStudent(s, fields) {
     errors.dob = "Date of birth cannot be in the future.";
   return errors;
 }
-export function parseImport(rows, school, existing) {
+export const isNotSubmitted = (student) =>
+  ["Draft", "Invited"].includes(student.status);
+
+export function approvalError(student, fields) {
+  if (!student.active) return "Activate this student before approving.";
+  if (!student.photo || Object.keys(validateStudent(student, fields)).length)
+    return "Complete the required ID fields and add a photo before approving.";
+  return "";
+}
+
+export function approvedStudent(student) {
+  return {
+    ...student,
+    status: "Approved",
+    note: "",
+    approvedAt: new Date().toISOString(),
+  };
+}
+
+export function parseImport(
+  rows,
+  school,
+  existing,
+  session = "2026–27",
+  customFields = [],
+) {
   let duplicates = 0,
     invalid = 0;
   const seen = new Set(
-    existing.filter((s) => s.school === school).map((s) => String(s.admission)),
+    existing
+      .filter((s) => s.school === school && s.session === session)
+      .map((s) => String(s.admission).trim()),
   );
   const students = [];
+  const normalize = (heading) =>
+    heading.toLowerCase().replace(/[^a-z0-9]/g, "");
   for (const row of rows) {
     const r = Object.fromEntries(
       Object.entries(row).map(([k, v]) => [
-        k.toLowerCase().replace(/[^a-z]/g, ""),
+        normalize(k),
         String(v ?? "").trim(),
       ]),
     );
-    const name = r.name || r.studentname;
+    const name = r.name || r.studentname || r.fullname;
     const admission = r.admission || r.admissionnumber || r.admissionno;
     const email = r.email || r.emailaddress;
     if (
       !name ||
       !admission ||
-      !email ||
-      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+      (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
     ) {
       invalid++;
       continue;
@@ -140,19 +175,26 @@ export function parseImport(rows, school, existing) {
       school,
       name,
       admission,
-      email,
-      phone: r.phone || r.contactnumber || "",
+      email: email || "",
+      phone: r.phone || r.contactnumber || r.mobilenumber || "",
       classNo: r.class || r.classno || "6",
       section: r.section || "A",
-      father: r.father || r.fathername || "",
-      mother: r.mother || r.mothername || "",
-      address: r.address || "",
+      father: r.father || r.fathername || r.fathersname || "",
+      mother: r.mother || r.mothername || r.mothersname || "",
+      address: r.address || r.residentialaddress || "",
+      gender: r.gender || "",
+      dob: r.dob || r.dateofbirth || "",
+      blood: (r.blood || r.bloodgroup || "").replace("-", "−"),
+      admissionDate: r.admissiondate || "",
+      transport: r.transport || r.transportroute || "",
       status: "Draft",
       active: true,
       photo: "",
       photoSource: "",
-      session: "2026–27",
-      custom: {},
+      session,
+      custom: Object.fromEntries(
+        customFields.map(({ id, name }) => [id, r[normalize(name)] || ""]),
+      ),
     });
   }
   return { students, duplicates, invalid };
@@ -247,6 +289,25 @@ export async function cardPDF(students, school, design = "Classic") {
   }
   return doc.output("blob");
 }
+export const photoLimit = 15 * 1024 * 1024;
+
+export function validPhoto(file) {
+  return (
+    file.size > 0 &&
+    file.size <= photoLimit &&
+    ["image/jpeg", "image/png", "image/webp"].includes(file.type)
+  );
+}
+
+export async function studentPhoto(file) {
+  const url = URL.createObjectURL(file);
+  try {
+    return await rasterPhoto(url);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
 function rasterPhoto(src) {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -262,7 +323,10 @@ function rasterPhoto(src) {
       const g = c.getContext("2d");
       g.fillStyle = "#fff";
       g.fillRect(0, 0, 240, 300);
-      g.drawImage(img, 0, 0, 240, 300);
+      const scale = Math.min(240 / img.naturalWidth, 300 / img.naturalHeight);
+      const width = img.naturalWidth * scale;
+      const height = img.naturalHeight * scale;
+      g.drawImage(img, (240 - width) / 2, (300 - height) / 2, width, height);
       resolve(c.toDataURL("image/jpeg", 0.8));
     };
     img.onerror = (e) => {
@@ -272,4 +336,96 @@ function rasterPhoto(src) {
     img.src = src;
   });
 }
+export async function exportStudents(rows, school, customFields, format) {
+  const filename = school.short || school.id;
+  if (format === "checklist") {
+    const { jsPDF } = await import("jspdf");
+    const doc = new jsPDF();
+    for (const [index, student] of rows.entries()) {
+      if (index % 7 === 0) {
+        if (index > 0) doc.addPage();
+        doc.setFontSize(15);
+        doc.text(doc.splitTextToSize(school.name, 175).slice(0, 1), 14, 16);
+        doc.setFontSize(10);
+        doc.text("ID card checking sheet", 14, 23);
+        doc.text(
+          "Reviewed by: ___________________   Date: __________",
+          14,
+          283,
+        );
+      }
+      const y = 32 + (index % 7) * 34;
+      if (student.photo) {
+        const photo = await rasterPhoto(student.photo).catch(() => null);
+        if (photo) doc.addImage(photo, "JPEG", 14, y, 19, 24);
+      }
+      doc.text(doc.splitTextToSize(student.name, 105).slice(0, 1), 38, y + 6);
+      doc.text(
+        `ADM ${student.admission} | Class ${student.classNo} ${student.section}`,
+        38,
+        y + 12,
+      );
+      doc.text(`Status: ${student.status}`, 38, y + 19);
+      doc.rect(154, y + 5, 4, 4);
+      doc.text("Checked", 160, y + 8);
+      doc.line(14, y + 29, 196, y + 29);
+    }
+    download(
+      `${filename}-checking-sheet.pdf`,
+      doc.output("blob"),
+      "application/pdf",
+    );
+    return;
+  }
+
+  const XLSX = await import("xlsx");
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(
+    workbook,
+    XLSX.utils.aoa_to_sheet([
+      [
+        ...FIELDS.map(([, label]) => label),
+        "Status",
+        "Session",
+        ...customFields.map(({ name }) => name),
+      ],
+      ...rows.map((s) => [
+        ...FIELDS.map(([key]) => s[key] || ""),
+        s.status,
+        s.session,
+        ...customFields.map(({ id }) => s.custom?.[id] || ""),
+      ]),
+    ]),
+    "Students",
+  );
+  const spreadsheet = XLSX.write(workbook, { type: "array", bookType: "xlsx" });
+  if (format === "excel") {
+    download(
+      `${filename}-students.xlsx`,
+      spreadsheet,
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    return;
+  }
+
+  const { zipSync } = await import("fflate");
+  const contents = { "students.xlsx": new Uint8Array(spreadsheet) };
+  for (const student of rows) {
+    if (!student.photo) continue;
+    const photo = await rasterPhoto(student.photo).catch(() => null);
+    if (!photo) continue;
+    const basename = `${student.admission}-${student.id}`.replace(
+      /[^a-z0-9_-]/gi,
+      "_",
+    );
+    const bytes = await (await fetch(photo)).arrayBuffer();
+    contents[`photos/${basename}.jpg`] = new Uint8Array(bytes);
+  }
+  download(
+    `${filename}-students-and-photos.zip`,
+    zipSync(contents, { level: 0 }),
+    "application/zip",
+  );
+}
+
 export const STAGES = ["In progress", "Printed", "Delivered"];
