@@ -26,6 +26,7 @@ import {
 import { PrintOrders, Designs, PhotoUploads } from "./pages/Production.jsx";
 import StudentPortal from "./pages/StudentPortal.jsx";
 import { clearFiles } from "./files.js";
+import PhoneWorkspace, { PhoneHome } from "./PhoneWorkspace.jsx";
 const pageNames = {
   overview: "Overview",
   students: "Students",
@@ -103,6 +104,17 @@ const menuItems = {
 };
 export default function App() {
   const initial = new URLSearchParams(window.location.search);
+  const appRoute = /^\/app\/?$/.test(window.location.pathname);
+  const [narrowScreen, setNarrowScreen] = useState(
+    () => window.matchMedia("(max-width: 760px)").matches,
+  );
+  const phoneView = appRoute || narrowScreen;
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 760px)");
+    const change = () => setNarrowScreen(media.matches);
+    media.addEventListener("change", change);
+    return () => media.removeEventListener("change", change);
+  }, []);
   const [data, setData] = useState(loadData),
     [role, setRole] = useState(
       ROLES.some((r) => r.id === initial.get("panel"))
@@ -113,11 +125,11 @@ export default function App() {
     pageNames[initial.get("page")] ? initial.get("page") : "overview",
   );
   const [schoolId, setSchoolId] = useState(initial.get("school") || "SCH-001");
+  const [reviewRecord, setReviewRecord] = useState(initial.get("record"));
   const [session, setSession] = useState("2026–27");
   const [toast, setToast] = useState(null),
     [openRoles, setOpenRoles] = useState(false),
     [notifications, setNotifications] = useState(false),
-    [mobileNav, setMobileNav] = useState(false),
     [globalSearch, setGlobalSearch] = useState(""),
     [searchOpen, setSearchOpen] = useState(false),
     [reset, setReset] = useState(false);
@@ -164,18 +176,20 @@ export default function App() {
     if (role !== "student") {
       u.searchParams.set("page", page);
       u.searchParams.set("school", schoolId);
+      if (page === "review" && reviewRecord)
+        u.searchParams.set("record", reviewRecord);
+      else u.searchParams.delete("record");
       u.searchParams.delete("student");
       u.searchParams.delete("token");
     }
     window.history.replaceState({}, "", u);
-  }, [role, page, schoolId]);
+  }, [role, page, schoolId, reviewRecord]);
   useEffect(() => {
     const listener = (e) => {
       if (e.key === "Escape") {
         setOpenRoles(false);
         setNotifications(false);
         setSearchOpen(false);
-        setMobileNav(false);
       }
     };
     window.addEventListener("keydown", listener);
@@ -191,16 +205,20 @@ export default function App() {
     availableSchools.find((s) => s.id === schoolId) ||
     availableSchools[0] ||
     data.schools[0];
-  const go = (target) => {
+  const go = (target, record = null) => {
+    if (phoneView && target !== page)
+      window.history.pushState({}, "", window.location.href);
     setPage(target);
-    setMobileNav(false);
+    setReviewRecord(record);
     window.scrollTo({ top: 0, behavior: "instant" });
   };
   const switchRole = (id) => {
+    if (phoneView && id !== role)
+      window.history.pushState({}, "", window.location.href);
     setRole(id);
     setPage("overview");
+    setReviewRecord(null);
     setOpenRoles(false);
-    setMobileNav(false);
     setSchoolId(id === "regular" ? "SCH-003" : "SCH-001");
     if (id === "student") {
       const u = new URL(window.location.href);
@@ -209,6 +227,22 @@ export default function App() {
       window.history.replaceState({}, "", u);
     }
   };
+  useEffect(() => {
+    const restore = () => {
+      const params = new URLSearchParams(window.location.search);
+      const panel = params.get("panel");
+      const screen = params.get("page");
+      setRole(ROLES.some((entry) => entry.id === panel) ? panel : "school");
+      setPage(pageNames[screen] ? screen : "overview");
+      setSchoolId(params.get("school") || "SCH-001");
+      setReviewRecord(params.get("record"));
+      setOpenRoles(false);
+      setNotifications(false);
+      setSearchOpen(false);
+    };
+    window.addEventListener("popstate", restore);
+    return () => window.removeEventListener("popstate", restore);
+  }, []);
   const userProfile =
     data.profiles?.[role] ||
     (role === "school"
@@ -236,6 +270,8 @@ export default function App() {
     log,
     setSchoolId,
     userProfile,
+    phoneView,
+    reviewRecord,
     design: data.schoolDesigns?.[school.id] || data.design,
     schoolStudents: data.students.filter(
       (s) => s.school === school.id && s.session === session,
@@ -306,7 +342,7 @@ export default function App() {
       content = <Invitations ctx={ctx} />;
       break;
     case "review":
-      content = <ReviewQueue ctx={ctx} />;
+      content = <ReviewQueue key={reviewRecord || "review"} ctx={ctx} />;
       break;
     case "schools":
       content = <Schools ctx={ctx} />;
@@ -345,7 +381,7 @@ export default function App() {
       content = <PrintOrders ctx={ctx} />;
       break;
     default:
-      content = <Dashboard ctx={ctx} />;
+      content = phoneView ? <PhoneHome ctx={ctx} /> : <Dashboard ctx={ctx} />;
   }
   const searchResults = globalSearch.trim()
     ? data.students
@@ -360,11 +396,22 @@ export default function App() {
         .slice(0, 5)
     : [];
   return (
-    <div className={role === "student" ? "student-shell" : "app-shell"}>
+    <div
+      className={
+        role === "student"
+          ? `student-shell ${phoneView ? "student-app" : ""}`
+          : phoneView
+            ? "phone-workspace"
+            : "app-shell"
+      }
+    >
       {role === "student" ? (
         <>
           <header className="student-top">
-            <a href="/?panel=school" className="brand student-brand">
+            <a
+              href={`${appRoute ? "/app" : "/"}?panel=school`}
+              className="brand student-brand"
+            >
               <img src="/logo.svg" alt="ID Studio" />
             </a>
             {roleControl}
@@ -374,16 +421,22 @@ export default function App() {
           </header>
           <StudentPortal ctx={ctx} />
         </>
+      ) : phoneView ? (
+        <PhoneWorkspace
+          ctx={ctx}
+          page={page}
+          pageNames={pageNames}
+          groups={menuItems[role] || menuItems.school}
+          selectedRole={selectedRole}
+          switchRole={switchRole}
+          onSearch={() => setSearchOpen(true)}
+          reviewCount={reviewCount}
+        >
+          {content}
+        </PhoneWorkspace>
       ) : (
         <>
-          {mobileNav && (
-            <button
-              className="nav-scrim"
-              aria-label="Close navigation"
-              onClick={() => setMobileNav(false)}
-            />
-          )}
-          <aside className={`sidebar ${mobileNav ? "mobile-open" : ""}`}>
+          <aside className="sidebar">
             <a
               className="brand"
               href="/?panel=school"
@@ -477,12 +530,6 @@ export default function App() {
           <div className="main-shell">
             <header className="topbar">
               <div className="breadcrumbs">
-                <IconButton
-                  icon="menu"
-                  label="Open navigation"
-                  className="icon-btn mobile-menu"
-                  onClick={() => setMobileNav(true)}
-                />
                 <Icon name="school" size={17} />
                 <span>
                   {role === "school" ? "School workspace" : selectedRole.name}

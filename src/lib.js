@@ -31,7 +31,8 @@ export const fmtDate = (d) =>
     year: "numeric",
   });
 export function studentLink(id) {
-  return `${window.location.origin}/?panel=student&student=${encodeURIComponent(id)}&token=demo-${encodeURIComponent(id)}`;
+  const entry = /^\/app\/?$/.test(window.location.pathname) ? "/app" : "/";
+  return `${window.location.origin}${entry}?panel=student&student=${encodeURIComponent(id)}&token=demo-${encodeURIComponent(id)}`;
 }
 export function eligible(s) {
   return s.status === "Approved" && Boolean(s.photo) && s.active;

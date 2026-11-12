@@ -563,7 +563,7 @@ export default function Students({ ctx }) {
           />
         ) : (
           <div className="table-wrap">
-            <table>
+            <table className="phone-records">
               <thead>
                 <tr>
                   <th>
@@ -598,7 +598,7 @@ export default function Students({ ctx }) {
               <tbody>
                 {rows.map((s, i) => (
                   <tr key={s.id}>
-                    <td>
+                    <td className="phone-record-select">
                       <input
                         type="checkbox"
                         aria-label={"Select " + s.name}
@@ -612,7 +612,7 @@ export default function Students({ ctx }) {
                         }
                       />
                     </td>
-                    <td>
+                    <td className="phone-record-title">
                       <button
                         className="person-cell person-button"
                         onClick={() => setView(s)}
@@ -628,16 +628,16 @@ export default function Students({ ctx }) {
                         </div>
                       </button>
                     </td>
-                    <td>
+                    <td data-label="CLASS & SECTION">
                       <span className="class-label">
                         {s.classNo} – {s.section}
                       </span>
                     </td>
-                    <td>
+                    <td data-label="CONTACT">
                       <span className="cell-email">{s.email}</span>
                       <small className="block muted">+91 {s.phone}</small>
                     </td>
-                    <td>
+                    <td data-label="PHOTO">
                       {s.photo ? (
                         <span className="photo-present">
                           <Icon name="checkCircle" size={14} />
@@ -647,10 +647,10 @@ export default function Students({ ctx }) {
                         <span className="muted">Missing</span>
                       )}
                     </td>
-                    <td>
+                    <td data-label="STATUS">
                       <Badge>{s.status}</Badge>
                     </td>
-                    <td>
+                    <td className="phone-record-actions">
                       <div className="row-actions">
                         <IconButton
                           icon="eye"

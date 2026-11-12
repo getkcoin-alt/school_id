@@ -218,7 +218,7 @@ export function Schools({ ctx }) {
           </Button>
         </div>
         <div className="table-wrap">
-          <table>
+          <table className="phone-records">
             <thead>
               <tr>
                 <th>SCHOOL</th>
@@ -232,7 +232,7 @@ export function Schools({ ctx }) {
             <tbody>
               {rows.map((s) => (
                 <tr key={s.id}>
-                  <td>
+                  <td className="phone-record-title">
                     <div className="person-cell">
                       <span
                         className="school-cell-icon"
@@ -248,21 +248,21 @@ export function Schools({ ctx }) {
                       </div>
                     </div>
                   </td>
-                  <td>
+                  <td data-label="CONTACT">
                     {s.email}
                     <small className="block muted">+91 {s.phone}</small>
                   </td>
-                  <td>
+                  <td data-label="AGENT">
                     {data.agents.find((a) => a.id === s.agent)?.name ||
                       "Unassigned"}
                   </td>
-                  <td>
+                  <td data-label="STUDENTS">
                     {data.students.filter((x) => x.school === s.id).length}
                   </td>
-                  <td>
+                  <td data-label="STATUS">
                     <Badge>{s.status}</Badge>
                   </td>
-                  <td>
+                  <td className="phone-record-actions">
                     <div className="row-actions">
                       <IconButton
                         icon="eye"
@@ -438,7 +438,7 @@ export function Agents({ ctx }) {
           />
         </div>
         <div className="table-wrap">
-          <table>
+          <table className="phone-records">
             <thead>
               <tr>
                 <th>AGENT</th>
@@ -453,7 +453,7 @@ export function Agents({ ctx }) {
             <tbody>
               {rows.map((a) => (
                 <tr key={a.id}>
-                  <td>
+                  <td className="phone-record-title">
                     <div className="person-cell">
                       <Avatar name={a.name} />
                       <div>
@@ -462,14 +462,14 @@ export function Agents({ ctx }) {
                       </div>
                     </div>
                   </td>
-                  <td>
+                  <td data-label="TYPE">
                     <Badge>{a.type}</Badge>
                   </td>
-                  <td>
+                  <td data-label="CONTACT">
                     {a.email}
                     <small className="block muted">{a.phone}</small>
                   </td>
-                  <td>
+                  <td data-label="SCHOOLS">
                     <a
                       href={`/?panel=${a.type === "Premium" ? "premium" : "regular"}&page=schools`}
                     >
@@ -477,7 +477,7 @@ export function Agents({ ctx }) {
                       schools
                     </a>
                   </td>
-                  <td>
+                  <td data-label="SUBSCRIPTION">
                     {a.type === "Premium" ? (
                       <>
                         <span>{fmtDate(a.end)}</span>
@@ -487,10 +487,10 @@ export function Agents({ ctx }) {
                       "Not required"
                     )}
                   </td>
-                  <td>
+                  <td data-label="STATUS">
                     <Badge>{a.status}</Badge>
                   </td>
-                  <td>
+                  <td className="phone-record-actions">
                     <div className="row-actions">
                       <IconButton
                         icon="edit"
@@ -735,7 +735,7 @@ export function Staff({ ctx }) {
           </Button>
         </div>
         <div className="table-wrap">
-          <table>
+          <table className="phone-records">
             <thead>
               <tr>
                 <th>STAFF MEMBER</th>
@@ -749,7 +749,7 @@ export function Staff({ ctx }) {
             <tbody>
               {rows.map((s) => (
                 <tr key={s.id}>
-                  <td>
+                  <td className="phone-record-title">
                     <div className="person-cell">
                       <Avatar name={s.name} photo={s.photo} />
                       <div>
@@ -758,18 +758,18 @@ export function Staff({ ctx }) {
                       </div>
                     </div>
                   </td>
-                  <td>{s.role}</td>
-                  <td>
+                  <td data-label="ROLE">{s.role}</td>
+                  <td data-label="CONTACT">
                     {s.email}
                     <small className="block muted">{s.phone}</small>
                   </td>
-                  <td>
+                  <td data-label="CARD STATUS">
                     <Badge>{s.printStatus}</Badge>
                   </td>
-                  <td>
+                  <td data-label="RECORD STATUS">
                     <Badge>{s.status}</Badge>
                   </td>
-                  <td>
+                  <td className="phone-record-actions">
                     <div className="row-actions">
                       {s.printStatus === "In review" && (
                         <IconButton
@@ -1290,7 +1290,7 @@ export function Promotion({ ctx }) {
         }
       >
         <div className="table-wrap">
-          <table>
+          <table className="phone-records">
             <thead>
               <tr>
                 <th>
@@ -1319,7 +1319,7 @@ export function Promotion({ ctx }) {
             <tbody>
               {rows.map((s) => (
                 <tr key={s.id}>
-                  <td>
+                  <td className="phone-record-select">
                     <input
                       type="checkbox"
                       aria-label={"Promote " + s.name}
@@ -1333,7 +1333,7 @@ export function Promotion({ ctx }) {
                       }
                     />
                   </td>
-                  <td>
+                  <td className="phone-record-title">
                     <div className="person-cell">
                       <Avatar name={s.name} />
                       <div>
@@ -1342,13 +1342,13 @@ export function Promotion({ ctx }) {
                       </div>
                     </div>
                   </td>
-                  <td>
+                  <td data-label="CURRENT CLASS">
                     {s.classNo} – {s.section}
                   </td>
-                  <td>
+                  <td data-label="NEW CLASS">
                     {to} – {targetSection}
                   </td>
-                  <td>{session}</td>
+                  <td data-label="SESSION">{session}</td>
                 </tr>
               ))}
             </tbody>
@@ -1411,7 +1411,7 @@ export function Sessions({ ctx }) {
       </PageTitle>
       <Panel>
         <div className="table-wrap">
-          <table>
+          <table className="phone-records">
             <thead>
               <tr>
                 <th>ACADEMIC SESSION</th>
@@ -1424,17 +1424,17 @@ export function Sessions({ ctx }) {
             <tbody>
               {data.sessions.map((s) => (
                 <tr key={s.name}>
-                  <td>
+                  <td className="phone-record-title">
                     <strong>{s.name}</strong>
                   </td>
-                  <td>{fmtDate(s.start)}</td>
-                  <td>{fmtDate(s.end)}</td>
-                  <td>
+                  <td data-label="START DATE">{fmtDate(s.start)}</td>
+                  <td data-label="END DATE">{fmtDate(s.end)}</td>
+                  <td data-label="STATUS">
                     <Badge tone={s.active ? "green" : "gray"}>
                       {s.active ? "Current" : "Archived / planned"}
                     </Badge>
                   </td>
-                  <td>
+                  <td className="phone-record-actions">
                     {!s.active && (
                       <Button
                         variant="text"

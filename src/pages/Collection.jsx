@@ -179,7 +179,7 @@ export function Invitations({ ctx }) {
           </select>
         </div>
         <div className="table-wrap">
-          <table>
+          <table className="phone-records">
             <thead>
               <tr>
                 <th>
@@ -213,7 +213,7 @@ export function Invitations({ ctx }) {
             <tbody>
               {rows.map((s) => (
                 <tr key={s.id}>
-                  <td>
+                  <td className="phone-record-select">
                     <input
                       type="checkbox"
                       aria-label={"Invite " + s.name}
@@ -226,7 +226,7 @@ export function Invitations({ ctx }) {
                       onChange={() => toggle(s.id)}
                     />
                   </td>
-                  <td>
+                  <td className="phone-record-title">
                     <div className="person-cell">
                       <Avatar name={s.name} />
                       <div>
@@ -235,14 +235,14 @@ export function Invitations({ ctx }) {
                       </div>
                     </div>
                   </td>
-                  <td>
+                  <td data-label="CLASS">
                     {s.classNo} – {s.section}
                   </td>
-                  <td>{s.email}</td>
-                  <td>
+                  <td data-label="EMAIL ADDRESS">{s.email}</td>
+                  <td data-label="STATUS">
                     <Badge>{s.status}</Badge>
                   </td>
-                  <td>
+                  <td className="phone-record-actions">
                     <div className="row-actions">
                       <IconButton
                         icon="copy"
@@ -440,7 +440,7 @@ export function ReviewQueue({ ctx }) {
   } = ctx;
   const [tab, setTab] = useState("In review"),
     [query, setQuery] = useState(""),
-    [chosen, setChosen] = useState(null),
+    [chosen, setChosen] = useState(ctx.phoneView ? ctx.reviewRecord : null),
     [reason, setReason] = useState(""),
     [edit, setEdit] = useState(null),
     [rejection, setRejection] = useState(false);
@@ -450,6 +450,8 @@ export function ReviewQueue({ ctx }) {
       `${s.name} ${s.admission}`.toLowerCase().includes(query.toLowerCase()),
   );
   const current = chosen ? data.students.find((s) => s.id === chosen) : list[0];
+  const phoneDetail =
+    ctx.phoneView && list.some((student) => student.id === chosen);
   const approve = () => {
     if (!current) return;
     const fields = FIELDS.filter((f) =>
@@ -552,7 +554,9 @@ export function ReviewQueue({ ctx }) {
           </button>
         ))}
       </div>
-      <div className="review-layout">
+      <div
+        className={`review-layout ${phoneDetail ? "phone-review-detail" : "phone-review-list"}`}
+      >
         <Panel className="review-list">
           <div className="padded">
             <SearchBox
@@ -568,6 +572,7 @@ export function ReviewQueue({ ctx }) {
               onClick={() => {
                 setChosen(s.id);
                 setRejection(false);
+                if (ctx.phoneView) window.scrollTo(0, 0);
               }}
             >
               <Avatar name={s.name} photo={s.photo} size={42} />
@@ -588,6 +593,14 @@ export function ReviewQueue({ ctx }) {
           )}
         </Panel>
         <Panel className="review-detail">
+          {phoneDetail && (
+            <button
+              className="phone-review-back"
+              onClick={() => setChosen(null)}
+            >
+              <Icon name="back" size={18} /> All submissions
+            </button>
+          )}
           {current && list.some((s) => s.id === current.id) ? (
             <>
               <div className="panel-header">

@@ -375,7 +375,7 @@ export function PhotoUploads({ ctx }) {
             subtitle={`${uploads.length} PDF collections for ${school.name}`}
           >
             <div className="table-wrap">
-              <table>
+              <table className="phone-records">
                 <thead>
                   <tr>
                     <th>PDF DOCUMENT</th>
@@ -388,7 +388,7 @@ export function PhotoUploads({ ctx }) {
                 <tbody>
                   {uploads.map((u) => (
                     <tr key={u.id}>
-                      <td>
+                      <td className="phone-record-title">
                         <div className="person-cell">
                           <span className="pdf-icon">
                             <Icon name="file" />
@@ -399,12 +399,12 @@ export function PhotoUploads({ ctx }) {
                           </div>
                         </div>
                       </td>
-                      <td>{u.pages}</td>
-                      <td>{fmtDate(u.date)}</td>
-                      <td>
+                      <td data-label="PAGES">{u.pages}</td>
+                      <td data-label="ADDED">{fmtDate(u.date)}</td>
+                      <td data-label="STATUS">
                         <Badge>{u.status}</Badge>
                       </td>
-                      <td>
+                      <td className="phone-record-actions">
                         <div className="row-actions">
                           <IconButton
                             icon="eye"
@@ -1039,7 +1039,7 @@ export function PrintOrders({ ctx }) {
           </select>
         </div>
         <div className="table-wrap">
-          <table>
+          <table className="phone-records">
             <thead>
               <tr>
                 <th>BATCH</th>
@@ -1053,19 +1053,21 @@ export function PrintOrders({ ctx }) {
             <tbody>
               {visibleBatches.map((b) => (
                 <tr key={b.id}>
-                  <td>
+                  <td className="phone-record-title">
                     <strong>{b.name}</strong>
                     <small className="block muted">
                       {b.id} · {fmtDate(b.date)}
                     </small>
                   </td>
-                  <td>{data.schools.find((s) => s.id === b.school)?.name}</td>
-                  <td>{b.count}</td>
-                  <td>{b.owner}</td>
-                  <td>
+                  <td data-label="SCHOOL">
+                    {data.schools.find((s) => s.id === b.school)?.name}
+                  </td>
+                  <td data-label="CARDS">{b.count}</td>
+                  <td data-label="FULFILLED BY">{b.owner}</td>
+                  <td data-label="STATUS">
                     <Badge>{b.status}</Badge>
                   </td>
-                  <td>
+                  <td className="phone-record-actions">
                     <div className="row-actions">
                       <IconButton
                         icon="eye"

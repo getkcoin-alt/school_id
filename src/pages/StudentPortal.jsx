@@ -12,7 +12,8 @@ import {
 } from "../components.jsx";
 import { validateStudent } from "../lib.js";
 export default function StudentPortal({ ctx }) {
-  const { data, update, notify, log } = ctx;
+  const { data, update, notify, log, phoneView } = ctx;
+  const workspacePath = phoneView ? "/app" : "/";
   const q = new URLSearchParams(window.location.search);
   const studentId = q.get("student") || "ST-0019";
   const token = q.get("token");
@@ -56,6 +57,9 @@ export default function StudentPortal({ ctx }) {
       stream?.getTracks().forEach((t) => t.stop());
     };
   }, [stream]);
+  useEffect(() => {
+    if (phoneView) window.scrollTo(0, 0);
+  }, [phoneView, step, submitted]);
   if (!original || !school || token !== `demo-${studentId}`)
     return (
       <div className="student-invalid">
@@ -65,7 +69,10 @@ export default function StudentPortal({ ctx }) {
           Check the complete link in your email, or ask your school admin for a
           new invitation.
         </p>
-        <a className="btn secondary" href="/?panel=school&page=invitations">
+        <a
+          className="btn secondary"
+          href={`${workspacePath}?panel=school&page=invitations`}
+        >
           Back to preview workspace
         </a>
       </div>
@@ -256,7 +263,10 @@ export default function StudentPortal({ ctx }) {
                 Need to change something? Contact {school.email} or call +91{" "}
                 {school.phone}. Your school admin can make corrections.
               </Callout>
-              <a href="/?panel=school&page=review" className="btn secondary">
+              <a
+                href={`${workspacePath}?panel=school&page=review`}
+                className="btn secondary"
+              >
                 Back to school preview <Icon name="arrow" size={16} />
               </a>
             </Panel>
