@@ -105,7 +105,7 @@ export default function Dashboard({ ctx }) {
         }
         description={
           isSchool
-            ? `Welcome back, ${ctx.userProfile.name.split(" ")[0]}. Here’s where your school IDs stand.`
+            ? `Welcome back, ${ctx.userProfile.name.split(" ").find((w) => !/^(mr|mrs|ms|miss|dr|sr|fr|br|prof|shri|smt|sri)\.?$/i.test(w)) || ctx.userProfile.name}. Here’s where your school IDs stand.`
             : "A clear view of your schools, photo collections, and card production."
         }
       >
