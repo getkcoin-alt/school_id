@@ -533,6 +533,19 @@ export default function Students({ ctx }) {
     [importing, setImporting] = useState(false),
     [view, setView] = useState(null),
     [remove, setRemove] = useState(null);
+  // Requests from universal search: open a student, or start adding/importing.
+  useEffect(() => {
+    const f = ctx.focus;
+    if (!f) return;
+    if (f.type === "student") {
+      const st = schoolStudents.find((s) => s.id === f.id);
+      if (!st) return; // wait until that school and session have loaded
+      setView(st);
+    } else if (f.name === "addStudent") setEdit({});
+    else if (f.name === "import") setImporting(true);
+    else return;
+    ctx.clearFocus();
+  }, [ctx.focus, schoolStudents]);
   const filtered = schoolStudents.filter(
     (s) =>
       (tab === "All" || s.active === (tab === "Active")) &&

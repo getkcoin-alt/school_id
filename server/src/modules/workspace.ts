@@ -16,7 +16,7 @@ import { isoDate } from "../lib/normalize.js";
 export async function workspaceRoutes(app: FastifyInstance) {
   app.get("/", async (req) => {
     const p = principal(req);
-    const q = z.object({ schoolId: z.string().optional() }).parse(req.query);
+    const q = z.object({ schoolId: z.string().optional(), session: z.string().optional() }).parse(req.query);
     const schools = await prisma.school.findMany({ where: schoolWhere(p), include: { agent: true }, orderBy: { name: "asc" } });
     const selected = schools.find((s) => s.id === q.schoolId || s.code === q.schoolId) ?? schools[0] ?? null;
     const agents = isSuper(p)
@@ -37,7 +37,7 @@ export async function workspaceRoutes(app: FastifyInstance) {
         prisma.schoolClass.findMany({ where: { schoolId: selected.id }, include: { sections: { orderBy: { name: "asc" } } }, orderBy: [{ sortOrder: "asc" }, { name: "asc" }] }),
         prisma.academicSession.findMany({ where: { schoolId: selected.id }, orderBy: { name: "desc" } }),
         prisma.staffRole.findMany({ where: { schoolId: selected.id }, orderBy: { name: "asc" } }),
-        prisma.student.groupBy({ by: ["status"], where: { schoolId: selected.id, session: selected.currentSession ?? undefined, deletedAt: null }, _count: true }),
+        prisma.student.groupBy({ by: ["status"], where: { schoolId: selected.id, session: q.session || selected.currentSession || undefined, deletedAt: null }, _count: true }),
       ]);
       school = {
         ...(await serializeSchool(selected)),

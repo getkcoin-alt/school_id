@@ -27,6 +27,7 @@ import { designRoutes } from "./modules/designs.js";
 import { activityRoutes } from "./modules/activity.js";
 import { notificationRoutes } from "./modules/notifications.js";
 import { workspaceRoutes } from "./modules/workspace.js";
+import { searchRoutes } from "./modules/search.js";
 import { fileRoutes } from "./modules/files.js";
 
 declare module "fastify" {
@@ -146,6 +147,7 @@ export async function buildApp() {
       await api.register(activityRoutes, { prefix: "/activity" });
       await api.register(notificationRoutes, { prefix: "/notifications" });
       await api.register(workspaceRoutes, { prefix: "/workspace" });
+      await api.register(searchRoutes, { prefix: "/search" });
       await api.register(fileRoutes, { prefix: "/files" });
     },
     { prefix: "/api/v1" },

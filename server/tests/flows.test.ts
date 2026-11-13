@@ -352,6 +352,47 @@ describe("partial updates", () => {
   });
 });
 
+describe("academic sessions", () => {
+  it("understands short session names and fills in the next session and its dates", async () => {
+    const { normaliseSession, nextSession } = await import("../src/lib/session.js");
+    expect(normaliseSession("2027")).toBe("2027–28");
+    expect(normaliseSession("2027-28")).toBe("2027–28");
+    expect(normaliseSession("2027/2028")).toBe("2027–28");
+    expect(normaliseSession("2027-29")).toBeNull();
+    expect(nextSession(["2025–26", "2026–27"])).toBe("2027–28");
+    const before = (await api(app, ctx.school).get(`/schools/${ctx.schoolId}/sessions`)).json();
+    const r = await api(app, ctx.school).post(`/schools/${ctx.schoolId}/sessions`, {});
+    expect(r.statusCode).toBe(200);
+    expect(r.json().name).toBe(before.next);
+    expect(r.json().startDate).toBe(`${before.next.slice(0, 4)}-04-01`);
+    expect((await api(app, ctx.school).post(`/schools/${ctx.schoolId}/sessions`, { name: before.next.replace("–", "-") })).statusCode).toBe(409);
+    const list = (await api(app, ctx.school).get(`/schools/${ctx.schoolId}/sessions`)).json();
+    expect(list.items.find((s: { isCurrent: boolean; students: number }) => s.isCurrent).students).toBeGreaterThan(0);
+  });
+
+  it("adds a session to all of an agent's schools at once", async () => {
+    const r = await api(app, ctx.premium).post("/schools/sessions/bulk", { name: "2031" });
+    expect(r.json().created).toBeGreaterThan(0);
+    const again = await api(app, ctx.premium).post("/schools/sessions/bulk", { name: "2031-32" });
+    expect(again.json().created).toBe(0);
+    expect((await api(app, ctx.school).post("/schools/sessions/bulk", { name: "2032" })).statusCode).toBe(403);
+  });
+});
+
+describe("universal search", () => {
+  it("finds students, schools and batches within the person's own access", async () => {
+    const all = (await api(app, root).get("/search?q=a")).json();
+    expect(all.students.length).toBeGreaterThan(0);
+    expect(all.schools.length).toBeGreaterThan(0);
+    const own = (await api(app, ctx.school).get("/search?q=a")).json();
+    expect(own.students.every((s: { schoolId: string }) => s.schoolId === ctx.schoolId)).toBe(true);
+    expect(own.schools).toHaveLength(0);
+    expect(own.agents).toHaveLength(0);
+    const other = (await api(app, ctx.other).get("/search?q=a")).json();
+    expect(other.students.some((s: { schoolId: string }) => s.schoolId === ctx.schoolId)).toBe(false);
+  });
+});
+
 describe("deleting with an impact summary", () => {
   it("deletes an open batch and returns its cards to Approved", async () => {
     const s = await prisma.student.findFirst({ where: { schoolId: ctx.schoolId, deletedAt: null, photoKey: { not: null }, status: { not: "SUBMITTED_FOR_PRINT" } } });

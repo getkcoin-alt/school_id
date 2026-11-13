@@ -1,10 +1,12 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { prisma } from "../lib/db.js";
-import { conflict, notFound } from "../lib/errors.js";
-import { accessSchool, isAgent, isSchool, isSuper, principal, require } from "../lib/access.js";
+import type { Prisma } from "@prisma/client";
+import { badRequest, conflict, notFound } from "../lib/errors.js";
+import { accessSchool, isAgent, isSchool, isSuper, principal, require, schoolWhere } from "../lib/access.js";
 import { audit } from "../lib/audit.js";
 import { isoDate, parseDate } from "../lib/normalize.js";
+import { nextSession, normaliseSession, sessionDates } from "../lib/session.js";
 
 /** Sessions, classes, sections and staff roles, all nested under a school. */
 export async function academicRoutes(app: FastifyInstance) {
@@ -13,23 +15,58 @@ export async function academicRoutes(app: FastifyInstance) {
   // ---- Academic sessions ----
   app.get("/:id/sessions", async (req) => {
     const school = await accessSchool(principal(req), (req.params as { id: string }).id);
-    const rows = await prisma.academicSession.findMany({ where: { schoolId: school.id }, orderBy: { name: "desc" } });
-    return { items: rows.map((r) => ({ id: r.id, name: r.name, startDate: isoDate(r.startDate), endDate: isoDate(r.endDate), isCurrent: r.isCurrent })) };
+    const [rows, counts] = await Promise.all([
+      prisma.academicSession.findMany({ where: { schoolId: school.id }, orderBy: { name: "desc" } }),
+      prisma.student.groupBy({ by: ["session"], where: { schoolId: school.id, deletedAt: null }, _count: true }),
+    ]);
+    return {
+      next: nextSession(rows.map((r) => r.name)),
+      items: rows.map((r) => ({ id: r.id, name: r.name, startDate: isoDate(r.startDate), endDate: isoDate(r.endDate), isCurrent: r.isCurrent, students: counts.find((c) => c.session === r.name)?._count ?? 0 })),
+    };
   });
+
+  /** Creates a session (name defaults to the one after the latest; dates to April–March). */
+  async function createSession(tx: Prisma.TransactionClient, schoolId: string, input: { name?: string; startDate?: string; endDate?: string; isCurrent?: boolean }) {
+    const existing = await tx.academicSession.findMany({ where: { schoolId }, select: { name: true } });
+    const name = input.name ? normaliseSession(input.name) : nextSession(existing.map((e) => e.name));
+    if (!name) throw badRequest("Write the session as a year, like 2027 or 2027–28.");
+    if (existing.some((e) => e.name === name)) return null;
+    const d = sessionDates(name);
+    if (input.isCurrent) await tx.academicSession.updateMany({ where: { schoolId }, data: { isCurrent: false } });
+    const row = await tx.academicSession.create({ data: { schoolId, name, startDate: parseDate(input.startDate || d.start), endDate: parseDate(input.endDate || d.end), isCurrent: Boolean(input.isCurrent) } });
+    if (input.isCurrent) await tx.school.update({ where: { id: schoolId }, data: { currentSession: name } });
+    return row;
+  }
+  const sessionBody = z.object({ name: z.string().trim().max(20).optional(), startDate: z.string().optional(), endDate: z.string().optional(), isCurrent: z.boolean().default(false) });
 
   app.post("/:id/sessions", async (req) => {
     const p = principal(req);
     require(canEdit(p));
     const school = await accessSchool(p, (req.params as { id: string }).id);
-    const body = z.object({ name: z.string().trim().min(4).max(20), startDate: z.string().optional(), endDate: z.string().optional(), isCurrent: z.boolean().default(false) }).parse(req.body);
-    const row = await prisma.$transaction(async (tx) => {
-      if (body.isCurrent) await tx.academicSession.updateMany({ where: { schoolId: school.id }, data: { isCurrent: false } });
-      const row = await tx.academicSession.create({ data: { schoolId: school.id, name: body.name, startDate: parseDate(body.startDate), endDate: parseDate(body.endDate), isCurrent: body.isCurrent } });
-      if (body.isCurrent) await tx.school.update({ where: { id: school.id }, data: { currentSession: body.name } });
-      return row;
-    });
-    await audit(req, { action: "session.created", summary: `${p.name} added session ${body.name} for ${school.name}`, schoolId: school.id, entityType: "session", entityId: row.id });
-    return row;
+    const body = sessionBody.parse(req.body);
+    const row = await prisma.$transaction((tx) => createSession(tx, school.id, body));
+    if (!row) throw conflict("That session already exists for this school.");
+    await audit(req, { action: "session.created", summary: `${p.name} added session ${row.name} for ${school.name}${row.isCurrent ? " (now current)" : ""}`, schoolId: school.id, entityType: "session", entityId: row.id });
+    return { id: row.id, name: row.name, startDate: isoDate(row.startDate), endDate: isoDate(row.endDate), isCurrent: row.isCurrent };
+  });
+
+  // Super admins and agents: add the same session to several schools at once.
+  app.post("/sessions/bulk", async (req) => {
+    const p = principal(req);
+    require(isSuper(p) || isAgent(p), "Only a super admin or an agent can add sessions to several schools.");
+    const body = sessionBody.extend({ schoolIds: z.array(z.string()).max(1000).optional() }).parse(req.body);
+    const name = body.name ? normaliseSession(body.name) : null;
+    if (body.name && !name) throw badRequest("Write the session as a year, like 2027 or 2027–28.");
+    const schools = await prisma.school.findMany({ where: { ...schoolWhere(p), ...(body.schoolIds ? { id: { in: body.schoolIds } } : {}) }, select: { id: true, name: true } });
+    let created = 0;
+    const skipped: string[] = [];
+    for (const s of schools) {
+      const row = await prisma.$transaction((tx) => createSession(tx, s.id, { ...body, name: name ?? undefined }));
+      if (row) created++;
+      else skipped.push(s.name);
+    }
+    await audit(req, { action: "session.bulk_created", summary: `${p.name} added session ${name ?? "(next)"} to ${created} school${created === 1 ? "" : "s"}${body.isCurrent ? " and made it current" : ""}` });
+    return { created, skipped };
   });
 
   app.patch("/:id/sessions/:sessionId", async (req) => {
@@ -38,6 +75,7 @@ export async function academicRoutes(app: FastifyInstance) {
     const { id, sessionId } = req.params as { id: string; sessionId: string };
     const school = await accessSchool(p, id);
     const body = z.object({ startDate: z.string().nullable().optional(), endDate: z.string().nullable().optional(), isCurrent: z.literal(true).optional() }).parse(req.body);
+    if (body.startDate && body.endDate && body.endDate < body.startDate) throw badRequest("The end date must be after the start date.");
     const row = await prisma.academicSession.findFirst({ where: { id: sessionId, schoolId: school.id } });
     if (!row) throw notFound("Session");
     await prisma.$transaction(async (tx) => {

@@ -35,7 +35,8 @@ async function allPages(path, size = 1000) {
 }
 
 export async function loadWorkspace(schoolId, session) {
-  const ws = await api.get(`/workspace${schoolId ? `?schoolId=${encodeURIComponent(schoolId)}` : ""}`);
+  const wq = new URLSearchParams({ ...(schoolId ? { schoolId } : {}), ...(session ? { session } : {}) }).toString();
+  const ws = await api.get(`/workspace${wq ? `?${wq}` : ""}`);
   const sc = ws.school;
   const sid = sc?.id;
   const q = sid ? `schoolId=${sid}` : "";
@@ -67,7 +68,9 @@ export async function loadWorkspace(schoolId, session) {
     classRecords: sc?.classes || [],
     sections: [...new Set((sc?.classes || []).flatMap((c) => c.sections.map((s) => s.name)))].sort(),
     sessions: (sc?.sessions || []).map((s) => ({ id: s.id, name: s.name, start: s.startDate || "", end: s.endDate || "", active: s.isCurrent })),
+    // The session being viewed, and the school's current (live) session.
     currentSession: sess,
+    schoolCurrentSession: sc?.currentSession || "",
     batches: batches.map(fromBatch),
     uploads: pdfs.map(fromPdf),
     designs: ws.designs.map(fromDesign),

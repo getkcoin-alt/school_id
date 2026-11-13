@@ -964,6 +964,12 @@ export function PrintOrders({ ctx }) {
     [carrier, setCarrier] = useState(""),
     [fulfilled, setFulfilled] = useState(""),
     [readySchools, setReadySchools] = useState(null);
+  useEffect(() => {
+    if (ctx.focus?.name === "createBatch") {
+      setCreate(true);
+      ctx.clearFocus();
+    }
+  }, [ctx.focus]);
   const { live } = ctx;
   const canProduce = ["super", "premium"].includes(role);
   const canDownload = role !== "regular" && (!live || ctx.permissions.download);

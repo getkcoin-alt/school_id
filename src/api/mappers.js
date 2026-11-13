@@ -1,5 +1,5 @@
 // Converts between API records and the shapes the screens already use.
-const STATUS = {
+export const STATUS = {
   DRAFT: "Draft",
   INVITED: "Invited",
   IN_REVIEW: "In review",

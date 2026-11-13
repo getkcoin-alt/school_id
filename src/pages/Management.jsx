@@ -19,6 +19,9 @@ import { auth } from "../api/client.js";
 import {
   uid,
   fmtDate,
+  nextSession,
+  normaliseSession,
+  sessionDates,
   exportCSV,
   download,
   csvText,
@@ -289,6 +292,12 @@ export function Schools({ ctx }) {
     [detail, setDetail] = useState(null),
     [remove, setRemove] = useState(null);
   const canDelete = ctx.live && ["super", "premium", "regular"].includes(ctx.role);
+  useEffect(() => {
+    if (ctx.focus?.name === "addSchool") {
+      setEdit({});
+      ctx.clearFocus();
+    }
+  }, [ctx.focus]);
   const rows = availableSchools.filter((s) =>
     `${s.name} ${s.city}`.toLowerCase().includes(query.toLowerCase()),
   );
@@ -532,6 +541,12 @@ export function Agents({ ctx }) {
       notify(e.message, "error");
     }
   };
+  useEffect(() => {
+    if (ctx.focus?.name === "addAgent") {
+      setEdit({ ...empty, id: uid("AG") });
+      ctx.clearFocus();
+    }
+  }, [ctx.focus]);
   const empty = {
     id: uid("AG"),
     name: "",
@@ -1428,18 +1443,50 @@ export function Classes({ ctx }) {
 }
 export function Promotion({ ctx }) {
   const { data, schoolStudents, school, update, notify, log } = ctx;
+  // Suggest the first session after the one being viewed (or a brand-new next one).
+  const later = data.sessions.map((s) => s.name).filter((n) => n > ctx.session).sort();
+  const suggested = later[0] || nextSession(data.sessions.map((s) => s.name));
   const [from, setFrom] = useState(data.classes[0]),
-    [section, setSection] = useState("A"),
+    [section, setSection] = useState(data.sections[0] || "A"),
     [to, setTo] = useState(data.classes[1] || data.classes[0]),
-    [targetSection, setTargetSection] = useState("A"),
-    [session, setSession] = useState("2027–28"),
+    [targetSection, setTargetSection] = useState(data.sections[0] || "A"),
+    [session, setSession] = useState(suggested),
     [selected, setSelected] = useState([]),
+    [busy, setBusy] = useState(false),
+    [result, setResult] = useState(null),
     [confirm, setConfirm] = useState(false);
+  // Moving to the next class is the usual choice.
+  const pickFrom = (c) => {
+    setFrom(c);
+    const i = data.classes.indexOf(c);
+    if (i >= 0 && data.classes[i + 1]) setTo(data.classes[i + 1]);
+  };
   const rows = schoolStudents.filter(
     (s) => s.classNo === from && s.section === section && s.active,
   );
   const picked = rows.filter((s) => selected.includes(s.id));
-  const promote = () => {
+  const promote = async () => {
+    const target = normaliseSession(session);
+    if (!target) {
+      notify("Write the session as a year, like 2027 or 2027–28.", "error");
+      return;
+    }
+    if (ctx.live) {
+      setBusy(true);
+      try {
+        const r = await ctx.api.post("/students/promote", { ids: picked.map((s) => s.id), toSession: target, className: to, section: targetSection || null });
+        setConfirm(false);
+        setSelected([]);
+        setResult({ ...r, session: target, to, targetSection });
+        await ctx.reload();
+        notify(`${r.promoted} students promoted to Class ${to} for ${target}${r.skipped ? `; ${r.skipped} were already there` : ""}.`);
+      } catch (e) {
+        notify(e.message, "error");
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     if (session === ctx.session) {
       notify(
         "Choose a different academic session to preserve current records.",
@@ -1503,13 +1550,33 @@ export function Promotion({ ctx }) {
         title="A new year. A smooth move."
         description="Promote students into a new academic session while keeping the current year’s records."
       />
+      {result && (
+        <Callout icon="success" tone="green">
+          <strong>
+            {result.promoted} students are now in Class {result.to}
+            {result.targetSection ? ` – ${result.targetSection}` : ""} for {result.session}.
+          </strong>{" "}
+          Their cards need a fresh approval.{" "}
+          <button type="button" className="link-button" onClick={() => ctx.setSession(result.session)}>
+            View {result.session}
+          </button>
+          {!data.sessions.find((s) => s.name === result.session)?.active && (
+            <>
+              {" "}·{" "}
+              <button type="button" className="link-button" onClick={() => ctx.go("sessions")}>
+                Make {result.session} current when you are ready
+              </button>
+            </>
+          )}
+        </Callout>
+      )}
       <Panel title="Choose the move">
         <div className="promotion-form">
           <Field label="From class">
             <select
               value={from}
               onChange={(e) => {
-                setFrom(e.target.value);
+                pickFrom(e.target.value);
                 setSelected([]);
               }}
             >
@@ -1549,13 +1616,20 @@ export function Promotion({ ctx }) {
               ))}
             </select>
           </Field>
-          <Field label="New session">
+          <Field label="Into session" hint={data.sessions.some((s) => s.name === normaliseSession(session)) ? "Existing session" : "Will be created"}>
             <input
               aria-label="Target academic session"
+              list="promotion-sessions"
               value={session}
               onChange={(e) => setSession(e.target.value)}
-              placeholder="2027–28"
+              onBlur={() => normaliseSession(session) && setSession(normaliseSession(session))}
+              placeholder={suggested}
             />
+            <datalist id="promotion-sessions">
+              {[...new Set([...later, suggested])].map((n) => (
+                <option key={n} value={n} />
+              ))}
+            </datalist>
           </Field>
         </div>
       </Panel>
@@ -1565,7 +1639,7 @@ export function Promotion({ ctx }) {
         action={
           <Button
             icon="up"
-            disabled={!picked.length || !/^\d{4}[–-]\d{2}$/.test(session)}
+            disabled={!picked.length || !normaliseSession(session) || normaliseSession(session) === ctx.session}
             onClick={() => setConfirm(true)}
           >
             Promote {picked.length} students
@@ -1661,7 +1735,9 @@ export function Promotion({ ctx }) {
             <Button variant="secondary" onClick={() => setConfirm(false)}>
               Cancel
             </Button>
-            <Button onClick={promote}>Confirm promotion</Button>
+            <Button disabled={busy} onClick={promote}>
+              {busy ? "Promoting…" : "Confirm promotion"}
+            </Button>
           </div>
         </Modal>
       )}
@@ -1669,123 +1745,314 @@ export function Promotion({ ctx }) {
   );
 }
 export function Sessions({ ctx }) {
-  const { data, update, notify } = ctx;
-  const [edit, setEdit] = useState(null);
+  const { data, update, notify, role, school, availableSchools } = ctx;
+  const multi = role !== "school"; // super admin and agents work across schools
+  const [counts, setCounts] = useState({}),
+    [start, setStart] = useState(null), // "next session" dialog
+    [makeCurrent, setMakeCurrent] = useState(null), // session to make current
+    [editDates, setEditDates] = useState(null),
+    [busy, setBusy] = useState(false),
+    [done, setDone] = useState(null);
+  const sessions = [...data.sessions].sort((a, b) => b.name.localeCompare(a.name));
+  const current = sessions.find((s) => s.active)?.name || "";
+  const next = nextSession(sessions.map((s) => s.name));
+  const loadCounts = () =>
+    ctx.live &&
+    ctx.api
+      .get(`/schools/${school.id}/sessions`)
+      .then((r) => setCounts(Object.fromEntries(r.items.map((i) => [i.name, i.students]))))
+      .catch(() => {});
+  useEffect(() => {
+    loadCounts();
+  }, [school.id, data.sessions.length]);
+  useEffect(() => {
+    if (ctx.focus?.name === "nextSession") {
+      openStart();
+      ctx.clearFocus();
+    }
+  }, [ctx.focus]);
+  const studentsIn = (name) => (ctx.live ? counts[name] : data.students.filter((x) => x.school === school.id && x.session === name).length);
+  function openStart() {
+    setStart({ name: next, ...sessionDates(next), datesTouched: false, current: false, all: false });
+  }
+  // Viewing a session in the top bar, and keeping every page on it.
+  const view = (name) => {
+    if (name === ctx.session) ctx.reload?.();
+    else ctx.setSession(name);
+  };
+  const create = async (e) => {
+    e.preventDefault();
+    const name = normaliseSession(start.name);
+    if (!name) {
+      notify("Write the session as a year, like 2027 or 2027–28.", "error");
+      return;
+    }
+    if (!start.all && sessions.some((x) => x.name === name)) {
+      notify(`${name} already exists for ${school.name}.`, "error");
+      return;
+    }
+    setBusy(true);
+    try {
+      if (ctx.live) {
+        const body = { name, startDate: start.start, endDate: start.end, isCurrent: start.current };
+        if (start.all) {
+          const r = await ctx.api.post("/schools/sessions/bulk", body);
+          notify(`${name} added to ${r.created} school${r.created === 1 ? "" : "s"}${r.skipped.length ? ` (${r.skipped.length} already had it)` : ""}.`);
+        } else {
+          await ctx.api.post(`/schools/${school.id}/sessions`, body);
+          notify(`${name} added for ${school.name}.`);
+        }
+        if (start.current) ctx.setSession(name);
+        await ctx.reload();
+      } else {
+        update((d) => ({
+          ...d,
+          sessions: [...d.sessions.map((x) => (start.current ? { ...x, active: false } : x)), { name, start: start.start, end: start.end, active: start.current }],
+        }));
+        if (start.current) ctx.setSession(name);
+        notify(`${name} added.`);
+      }
+      setDone({ name, current: start.current });
+      setStart(null);
+    } catch (err) {
+      notify(err.message, "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const setCurrent = async () => {
+    const s = makeCurrent;
+    setBusy(true);
+    try {
+      if (ctx.live) {
+        await ctx.api.patch(`/schools/${school.id}/sessions/${s.id}`, { isCurrent: true });
+      } else {
+        update((d) => ({ ...d, sessions: d.sessions.map((x) => ({ ...x, active: x.name === s.name })) }));
+      }
+      view(s.name); // switching (or reloading) brings every page onto the new session
+      notify(`${s.name} is now the current session for ${school.name}. Every page now shows ${s.name}.`);
+      setMakeCurrent(null);
+    } catch (err) {
+      notify(err.message, "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const saveDates = async (e) => {
+    e.preventDefault();
+    try {
+      if (ctx.live) {
+        await ctx.api.patch(`/schools/${school.id}/sessions/${editDates.id}`, { startDate: editDates.start, endDate: editDates.end });
+        await ctx.reload();
+      } else update((d) => ({ ...d, sessions: d.sessions.map((x) => (x.name === editDates.name ? { ...x, start: editDates.start, end: editDates.end } : x)) }));
+      notify("Session dates saved.");
+      setEditDates(null);
+    } catch (err) {
+      notify(err.message, "error");
+    }
+  };
   return (
     <>
       <PageTitle
         eyebrow="ONE SCHOOL YEAR AT A TIME"
         title="Keep every academic year in order."
-        description="Separate this year’s identities from the next, without losing history."
+        description="Start the next year in one click, move students up, and switch the whole workspace when you are ready."
       >
-        <Button
-          icon="plus"
-          onClick={() =>
-            setEdit({
-              name: "2027–28",
-              start: "2027-04-01",
-              end: "2028-03-31",
-              active: false,
-            })
-          }
-        >
-          Add session
+        <Button icon="plus" onClick={openStart}>
+          Start {next}
         </Button>
       </PageTitle>
-      <Panel>
+      {multi && (
+        <div className="school-context-picker">
+          <span className="school-cell-icon">
+            <Icon name="school" />
+          </span>
+          <div>
+            <small>Sessions for</small>
+            <select aria-label="School" value={school.id} onChange={(e) => ctx.setSchoolId(e.target.value)}>
+              {availableSchools.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <Badge tone="green">{current ? `Current: ${current}` : "No current session"}</Badge>
+        </div>
+      )}
+      {done && (
+        <Callout icon="success" tone="green">
+          <strong>{done.name} is ready{done.current ? " and is now the current session" : ""}.</strong> Next:{" "}
+          <button type="button" className="link-button" onClick={() => ctx.go("promotion")}>
+            promote students into {done.name}
+          </button>
+          {!done.current && (
+            <>
+              {" "}or{" "}
+              <button type="button" className="link-button" onClick={() => setMakeCurrent(data.sessions.find((x) => x.name === done.name) || { name: done.name })}>
+                make it the current session
+              </button>
+            </>
+          )}
+          .
+        </Callout>
+      )}
+      <Panel title={`${sessions.length} academic session${sessions.length === 1 ? "" : "s"}`} subtitle={`${school.name} · you are viewing ${ctx.session || "—"}`}>
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
                 <th>ACADEMIC SESSION</th>
-                <th>START DATE</th>
-                <th>END DATE</th>
+                <th>DATES</th>
+                <th>STUDENTS</th>
                 <th>STATUS</th>
-                <th>ACTION</th>
+                <th>ACTIONS</th>
               </tr>
             </thead>
             <tbody>
-              {data.sessions.map((s) => (
-                <tr key={s.name}>
-                  <td>
-                    <strong>{s.name}</strong>
-                  </td>
-                  <td>{fmtDate(s.start)}</td>
-                  <td>{fmtDate(s.end)}</td>
-                  <td>
-                    <Badge tone={s.active ? "green" : "gray"}>
-                      {s.active ? "Current" : "Archived / planned"}
-                    </Badge>
-                  </td>
-                  <td>
-                    {!s.active && (
-                      <Button
-                        variant="text"
-                        onClick={() => {
-                          update((d) => ({
-                            ...d,
-                            sessions: d.sessions.map((x) => ({
-                              ...x,
-                              active: x.name === s.name,
-                            })),
-                          }));
-                          ctx.setSession(s.name);
-                          notify("Current academic session updated.");
-                        }}
-                      >
-                        Set as current
-                      </Button>
-                    )}
-                  </td>
-                </tr>
-              ))}
+              {sessions.map((s) => {
+                const n = studentsIn(s.name);
+                const future = s.name > current;
+                return (
+                  <tr key={s.name}>
+                    <td>
+                      <strong>{s.name}</strong>
+                      {s.name === ctx.session && <small className="block muted">Viewing now</small>}
+                    </td>
+                    <td>
+                      {s.start ? fmtDate(s.start) : "—"} – {s.end ? fmtDate(s.end) : "—"}
+                    </td>
+                    <td>{n ?? "…"}</td>
+                    <td>
+                      <Badge tone={s.active ? "green" : future ? "blue" : "gray"}>{s.active ? "Current" : future ? "Upcoming" : "Past"}</Badge>
+                    </td>
+                    <td>
+                      <div className="row-actions">
+                        {s.name !== ctx.session && (
+                          <Button variant="text" onClick={() => view(s.name)}>
+                            View
+                          </Button>
+                        )}
+                        {!s.active && (
+                          <Button variant="text" onClick={() => setMakeCurrent(s)}>
+                            Make current
+                          </Button>
+                        )}
+                        <IconButton icon="edit" label={"Edit dates of " + s.name} onClick={() => setEditDates({ ...s })} />
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
+        {!sessions.length && <Empty title="No sessions yet" text={`Start ${next} to begin.`} />}
       </Panel>
-      {edit && (
-        <Modal title="Add academic session" onClose={() => setEdit(null)}>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (data.sessions.some((s) => s.name === edit.name)) {
-                notify("That session already exists.", "error");
-                return;
-              }
-              update((d) => ({ ...d, sessions: [...d.sessions, edit] }));
-              setEdit(null);
-              notify("Academic session added.");
-            }}
-          >
+      <Callout icon="guide">
+        <strong>How sessions work:</strong> every student record belongs to one session. The current session is what everyone works in by default: new students, imports, student links, review, dashboards and print batches. Older sessions stay available from the session menu at the top. To move into a new year, start the next session, promote students into it, then make it current.
+      </Callout>
+      {start && (
+        <Modal title="Start a new academic session" subtitle="We filled everything in. Change anything you like." onClose={() => setStart(null)}>
+          <form onSubmit={create}>
             <div className="modal-body form-grid">
-              <Field label="Session name">
+              <Field label="Session" hint="Type just the year, like 2027.">
                 <input
                   required
-                  pattern="[0-9]{4}[–-][0-9]{2}"
-                  value={edit.name}
-                  onChange={(e) => setEdit({ ...edit, name: e.target.value })}
+                  autoFocus
+                  value={start.name}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    const n = normaliseSession(v);
+                    setStart({ ...start, name: v, ...(n && !start.datesTouched ? sessionDates(n) : {}) });
+                  }}
+                  onBlur={() => {
+                    const n = normaliseSession(start.name);
+                    if (n) setStart({ ...start, name: n });
+                  }}
                 />
               </Field>
-              <Field label="Start date">
-                <input
-                  type="date"
-                  required
-                  value={edit.start}
-                  onChange={(e) => setEdit({ ...edit, start: e.target.value })}
-                />
+              <div />
+              <Field label="Starts">
+                <input type="date" required value={start.start} onChange={(e) => setStart({ ...start, start: e.target.value, datesTouched: true })} />
               </Field>
-              <Field label="End date">
-                <input
-                  type="date"
-                  min={edit.start}
-                  required
-                  value={edit.end}
-                  onChange={(e) => setEdit({ ...edit, end: e.target.value })}
-                />
+              <Field label="Ends">
+                <input type="date" required min={start.start} value={start.end} onChange={(e) => setStart({ ...start, end: e.target.value, datesTouched: true })} />
+              </Field>
+              <label className="check-label span-two">
+                <input type="checkbox" checked={start.current} onChange={(e) => setStart({ ...start, current: e.target.checked })} />
+                <span>
+                  Make it the current session now
+                  <small className="block muted">Leave this off to prepare the new year first and switch later. {current && `${current} stays current until you switch.`}</small>
+                </span>
+              </label>
+              {multi && ctx.live && (
+                <label className="check-label span-two">
+                  <input type="checkbox" checked={start.all} onChange={(e) => setStart({ ...start, all: e.target.checked })} />
+                  <span>
+                    Add it to all {availableSchools.length} of my schools
+                    <small className="block muted">Schools that already have it are skipped.</small>
+                  </span>
+                </label>
+              )}
+            </div>
+            <div className="modal-actions">
+              <Button variant="secondary" onClick={() => setStart(null)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={busy}>
+                {busy ? "Saving…" : `Start ${normaliseSession(start.name) || "session"}`}
+              </Button>
+            </div>
+          </form>
+        </Modal>
+      )}
+      {makeCurrent && (
+        <Modal title={`Make ${makeCurrent.name} the current session?`} subtitle={school.name} onClose={() => setMakeCurrent(null)}>
+          <div className="modal-body delete-impact">
+            <ul>
+              <li>
+                New students, imports, student links, review, dashboards and new print batches will use <strong>{makeCurrent.name}</strong>.
+              </li>
+              <li>The whole workspace switches to {makeCurrent.name} right away.</li>
+              {current && <li>{current} records are kept and stay available from the session menu at the top.</li>}
+              {studentsIn(makeCurrent.name) === 0 && (
+                <li>
+                  {makeCurrent.name} has no students yet.{" "}
+                  <button type="button" className="link-button" onClick={() => { setMakeCurrent(null); ctx.go("promotion"); }}>
+                    Promote students first
+                  </button>{" "}
+                  if you want this year's students to carry on.
+                </li>
+              )}
+            </ul>
+          </div>
+          <div className="modal-actions">
+            <Button variant="secondary" onClick={() => setMakeCurrent(null)}>
+              Cancel
+            </Button>
+            <Button disabled={busy || !makeCurrent.id && ctx.live} onClick={setCurrent}>
+              {busy ? "Switching…" : `Make ${makeCurrent.name} current`}
+            </Button>
+          </div>
+        </Modal>
+      )}
+      {editDates && (
+        <Modal title={`Dates for ${editDates.name}`} onClose={() => setEditDates(null)}>
+          <form onSubmit={saveDates}>
+            <div className="modal-body form-grid">
+              <Field label="Starts">
+                <input type="date" required value={editDates.start || ""} onChange={(e) => setEditDates({ ...editDates, start: e.target.value })} />
+              </Field>
+              <Field label="Ends">
+                <input type="date" required min={editDates.start} value={editDates.end || ""} onChange={(e) => setEditDates({ ...editDates, end: e.target.value })} />
               </Field>
             </div>
             <div className="modal-actions">
-              <Button type="submit">Save session</Button>
+              <Button variant="secondary" onClick={() => setEditDates(null)}>
+                Cancel
+              </Button>
+              <Button type="submit">Save dates</Button>
             </div>
           </form>
         </Modal>

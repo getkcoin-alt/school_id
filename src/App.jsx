@@ -31,6 +31,7 @@ import { clearFiles } from "./files.js";
 import { api, apiMode, auth, downloadFile, onAuthChange } from "./api/client.js";
 import { loadWorkspace, pushChanges, onApprovalReport } from "./api/sync.js";
 import { ROLE_FROM_API } from "./api/mappers.js";
+import CommandPalette from "./CommandPalette.jsx";
 const pageNames = {
   overview: "Overview",
   students: "Students",
@@ -62,6 +63,7 @@ const menuItems = {
       "SCHOOL MANAGEMENT",
       ["staff", "user"],
       ["classes", "layers"],
+      ["sessions", "calendar"],
       ["promotion", "up"],
     ],
     [
@@ -89,7 +91,7 @@ const menuItems = {
     ["MANAGEMENT", ["sessions", "calendar"], ["activity", "clock"]],
   ],
   premium: [
-    ["WORKSPACE", ["overview", "dashboard"], ["schools", "school"]],
+    ["WORKSPACE", ["overview", "dashboard"], ["schools", "school"], ["sessions", "calendar"]],
     [
       "PRODUCTION",
       ["photos", "fileUp"],
@@ -102,6 +104,7 @@ const menuItems = {
       "WORKSPACE",
       ["overview", "dashboard"],
       ["schools", "school"],
+      ["sessions", "calendar"],
       ["photos", "fileUp"],
       ["printing", "print"],
     ],
@@ -198,9 +201,10 @@ function App({ live = false, initialData = null }) {
     [openRoles, setOpenRoles] = useState(false),
     [notifications, setNotifications] = useState(false),
     [mobileNav, setMobileNav] = useState(false),
-    [globalSearch, setGlobalSearch] = useState(""),
     [searchOpen, setSearchOpen] = useState(false),
+    [focus, setFocus] = useState(null),
     [reset, setReset] = useState(false);
+  const notifRef = useRef(null);
   const toastTimer = useRef();
   const notify = (message, tone = "success") => {
     setToast({ message, tone });
@@ -213,7 +217,19 @@ function App({ live = false, initialData = null }) {
   };
   const reload = async () => {
     const { schoolId: sid, session: sess } = viewRef.current;
-    replaceData(await loadWorkspace(sid, sess));
+    const next = await loadWorkspace(sid, sess);
+    replaceData(next);
+    // Opening another school starts on that school's own current session.
+    if (live && !sess && next.currentSession) {
+      skipReload.current = true;
+      setSession(next.currentSession);
+    }
+  };
+  const skipReload = useRef(false);
+  const changeSchool = (id) => {
+    if (!id || id === viewRef.current.schoolId) return;
+    setSchoolId(id);
+    if (live) setSession("");
   };
   // In live mode every change is applied optimistically, then saved through the
   // API in order and the workspace reloaded from the server.
@@ -256,6 +272,10 @@ function App({ live = false, initialData = null }) {
       firstLoad.current = false;
       return;
     }
+    if (skipReload.current) {
+      skipReload.current = false;
+      return;
+    }
     reload().catch((e) => notify(e.message, "error"));
   }, [schoolId, session]);
   useEffect(() => {
@@ -290,6 +310,31 @@ function App({ live = false, initialData = null }) {
     }
     window.history.replaceState({}, "", u);
   }, [role, page, schoolId]);
+  // Ctrl/Cmd + K opens universal search from anywhere.
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setNotifications(false);
+        setSearchOpen((o) => !o);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  // Clicking anywhere outside the notifications panel closes it.
+  useEffect(() => {
+    if (!notifications) return;
+    const close = (e) => {
+      if (!notifRef.current?.contains(e.target)) setNotifications(false);
+    };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("touchstart", close);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("touchstart", close);
+    };
+  }, [notifications]);
   useEffect(() => {
     const listener = (e) => {
       if (e.key === "Escape") {
@@ -363,7 +408,10 @@ function App({ live = false, initialData = null }) {
     go,
     notify,
     log,
-    setSchoolId,
+    setSchoolId: changeSchool,
+    // One-shot request from search/actions for a page to open something.
+    focus,
+    clearFocus: () => setFocus(null),
     userProfile,
     design: data.schoolDesigns?.[school.id] || data.design,
     schoolStudents: data.students.filter(
@@ -375,6 +423,8 @@ function App({ live = false, initialData = null }) {
     (s) => s.status === "In review",
   ).length;
   const unread = data.notifications.filter((n) => !n.read).length;
+  // The school's current session (what everyone works in by default).
+  const currentName = data.sessions.find((s) => s.active)?.name || data.schoolCurrentSession || "";
   const roleControl = (
     <div className="role-switcher">
       <button
@@ -476,18 +526,58 @@ function App({ live = false, initialData = null }) {
     default:
       content = <Dashboard ctx={ctx} />;
   }
-  const searchResults = globalSearch.trim()
-    ? data.students
-        .filter(
-          (s) =>
-            (role === "super" ||
-              availableSchools.some((sch) => sch.id === s.school)) &&
-            `${s.name} ${s.admission}`
-              .toLowerCase()
-              .includes(globalSearch.toLowerCase()),
-        )
-        .slice(0, 5)
-    : [];
+  const shortcut = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent) ? "⌘" : "Ctrl";
+  // Pages and quick actions offered by universal search for this panel.
+  const palettePages = [
+    ...(menuItems[role] || menuItems.school).flatMap(([, ...items]) => items),
+    ["settings", "settings"],
+    ["guide", "help"],
+  ].map(([key, icon]) => [key, pageNames[key], icon]);
+  const act = (title, icon, target, name, keywords) => ({ title, icon, keywords, run: (x) => x.go(target, name) });
+  const paletteActions = {
+    school: [
+      act("Add a student", "plus", "students", "addStudent", "new student create"),
+      act("Import students from Excel", "upload", "students", "import", "upload sheet csv"),
+      act("Send student links", "email", "invitations", null, "invite email"),
+      act("Review submissions", "review", "review", null, "approve"),
+      act("Create a print batch", "print", "printing", "createBatch", "print order"),
+      act("Start the next session", "calendar", "sessions", "nextSession", "academic year new session"),
+    ],
+    super: [
+      act("Add a school", "plus", "schools", "addSchool", "new school create"),
+      act("Add an agent", "briefcase", "agents", "addAgent", "new agent vendor"),
+      act("Create a print batch", "print", "printing", "createBatch", "print order"),
+      act("Start the next session", "calendar", "sessions", "nextSession", "academic year new session"),
+    ],
+    premium: [
+      act("Create a print batch", "print", "printing", "createBatch", "print order"),
+      act("Start the next session", "calendar", "sessions", "nextSession", "academic year new session"),
+    ],
+    regular: [
+      act("Create a print batch", "print", "printing", "createBatch", "print order"),
+      act("Start the next session", "calendar", "sessions", "nextSession", "academic year new session"),
+    ],
+  }[role] || [];
+  const runPalette = (item) => {
+    setSearchOpen(false);
+    if (!item) return;
+    item.run({
+      go: (target, name) => {
+        go(target);
+        if (name) setFocus({ type: "action", name });
+      },
+      openStudent: (st) => {
+        if (st.schoolId) setSchoolId(st.schoolId);
+        setSession(st.session || "");
+        go("students");
+        setFocus({ type: "student", id: st.id });
+      },
+      openSchool: (sc, target) => {
+        changeSchool(sc.id);
+        go(target || (role === "school" ? "overview" : "students"));
+      },
+    });
+  };
   return (
     <div className={role === "student" ? "student-shell" : "app-shell"}>
       {role === "student" ? (
@@ -648,14 +738,17 @@ function App({ live = false, initialData = null }) {
                 )}
                 <span className="header-separator" />
                 <button
-                  className="icon-btn"
-                  title="Search students"
-                  aria-label="Search students"
+                  className="search-trigger"
+                  title={`Search (${shortcut} K)`}
+                  aria-label="Search"
+                  aria-keyshortcuts="Control+K Meta+K"
                   onClick={() => setSearchOpen(true)}
                 >
-                  <Icon name="search" />
+                  <Icon name="search" size={17} />
+                  <span>Search</span>
+                  <kbd>{shortcut} K</kbd>
                 </button>
-                <div className="notifications-wrap">
+                <div className="notifications-wrap" ref={notifRef}>
                   <button
                     className="icon-btn notification-button"
                     aria-label="Notifications"
@@ -686,7 +779,12 @@ function App({ live = false, initialData = null }) {
                         <button
                           key={n.id}
                           onClick={() => {
-                            go(n.title.includes("PDF") ? "photos" : "review");
+                            if (!n.read)
+                              update((d) => ({
+                                ...d,
+                                notifications: d.notifications.map((x) => (x.id === n.id ? { ...x, read: true } : x)),
+                              }));
+                            go(n.link && pageNames[n.link] ? n.link : n.title.includes("PDF") ? "photos" : n.title.toLowerCase().includes("batch") ? "printing" : "review");
                             setNotifications(false);
                           }}
                         >
@@ -724,12 +822,28 @@ function App({ live = false, initialData = null }) {
                     value={session}
                     onChange={(e) => setSession(e.target.value)}
                   >
-                    {data.sessions.map((s) => (
-                      <option key={s.name}>{s.name}</option>
-                    ))}
+                    {[...data.sessions]
+                      .sort((a, b) => b.name.localeCompare(a.name))
+                      .map((s) => (
+                        <option key={s.name} value={s.name}>
+                          {s.name}
+                          {s.name === currentName ? " · current" : ""}
+                        </option>
+                      ))}
                   </select>
                 </div>
               </div>
+              {currentName && session !== currentName && !["sessions", "schools", "agents"].includes(page) && (
+                <div className="session-banner" role="status">
+                  <Icon name="calendar" size={16} />
+                  <span>
+                    You are viewing <strong>{session}</strong>{session > currentName ? " (upcoming)" : " (past)"}. The current session is <strong>{currentName}</strong>; changes here apply to {session}.
+                  </span>
+                  <Button variant="secondary" onClick={() => setSession(currentName)}>
+                    Switch to {currentName}
+                  </Button>
+                </div>
+              )}
               {content}
               <footer className="main-footer">
                 <span>© 2026 ID Studio</span>
@@ -756,50 +870,17 @@ function App({ live = false, initialData = null }) {
           />
         </div>
       )}
-      {searchOpen && (
-        <Modal
-          title="Find a student"
-          subtitle="Search by name or admission number."
-          onClose={() => setSearchOpen(false)}
-        >
-          <div className="modal-body">
-            <div className="search-box">
-              <Icon name="search" />
-              <input
-                autoFocus
-                value={globalSearch}
-                onChange={(e) => setGlobalSearch(e.target.value)}
-                placeholder="Try Aarav or 2026001"
-                aria-label="Global student search"
-              />
-            </div>
-            {searchResults.map((s) => (
-              <button
-                className="search-result"
-                key={s.id}
-                onClick={() => {
-                  setSchoolId(s.school);
-                  setSession(s.session);
-                  go("students");
-                  setSearchOpen(false);
-                }}
-              >
-                <Avatar name={s.name} />
-                <div>
-                  <strong>{s.name}</strong>
-                  <small>
-                    {s.admission} · Class {s.classNo} {s.section}
-                  </small>
-                </div>
-                <Badge>{s.status}</Badge>
-              </button>
-            ))}
-            {globalSearch && !searchResults.length && (
-              <p className="muted padded">No matching students.</p>
-            )}
-          </div>
-        </Modal>
-      )}
+      <CommandPalette
+        open={searchOpen && role !== "student"}
+        live={live}
+        api={api}
+        data={data}
+        role={role}
+        availableSchools={availableSchools}
+        pages={palettePages}
+        actions={paletteActions}
+        onClose={runPalette}
+      />
       {reset && (
         <Modal
           title="Reset this preview?"
