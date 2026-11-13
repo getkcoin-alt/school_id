@@ -31,6 +31,10 @@ export const ROLES = [
     icon: "graduation",
   },
 ];
+export const PARENT_PREFIXES = {
+  fatherPrefix: ["Mr.", "Sh.", "Dr.", "Md.", "Late Sh."],
+  motherPrefix: ["Mrs.", "Smt.", "Dr.", "Ms.", "Late Smt."],
+};
 export const FIELDS = [
   ["name", "Full name", "text", true],
   ["admission", "Admission number", "text", true],
@@ -38,7 +42,9 @@ export const FIELDS = [
   ["section", "Section", "section", true],
   ["gender", "Gender", "gender", false],
   ["dob", "Date of birth", "date", false],
+  ["fatherPrefix", "Prefix (Father)", "fatherPrefix", false],
   ["father", "Father’s name", "text", true],
+  ["motherPrefix", "Prefix (Mother)", "motherPrefix", false],
   ["mother", "Mother’s name", "text", true],
   ["email", "Email address", "email", true],
   ["phone", "Contact number", "tel", true],

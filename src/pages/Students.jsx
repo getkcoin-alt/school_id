@@ -11,6 +11,7 @@ import {
   Badge,
   Modal,
   Field,
+  ParentPrefixSelect,
   Callout,
   Empty,
   CardPreview,
@@ -45,7 +46,9 @@ export function StudentEditor({ ctx, student, onClose, onSaved }) {
           section: "A",
           gender: "",
           dob: "",
+          fatherPrefix: "",
           father: "",
+          motherPrefix: "",
           mother: "",
           email: "",
           phone: "",
@@ -225,7 +228,13 @@ export function StudentEditor({ ctx, student, onClose, onSaved }) {
               error={errors[key]}
               className={key === "address" ? "span-two" : ""}
             >
-              {["class", "section", "gender", "blood"].includes(type) ? (
+              {key === "fatherPrefix" || key === "motherPrefix" ? (
+                <ParentPrefixSelect
+                  type={type}
+                  value={draft[key]}
+                  onChange={(value) => change(key, value)}
+                />
+              ) : ["class", "section", "gender", "blood"].includes(type) ? (
                 <select
                   value={draft[key] || ""}
                   onChange={(e) => change(key, e.target.value)}
@@ -313,7 +322,7 @@ export function ImportStudents({ ctx, onClose }) {
   const sample = () =>
     download(
       "student-import-template.csv",
-      'name,admission,class,section,email,phone,father,mother,address,gender,dob,admissionDate,blood,transport\nSample Student,NEW-001,6,A,student@example.com,9876500000,Parent Name,Parent Name,"Udaipur, Rajasthan",,2014-08-01,2026-04-01,O+,',
+      'name,admission,class,section,email,phone,PREFIXF,father,PREFIXM,mother,address,gender,dob,admissionDate,blood,transport\nSample Student,NEW-001,6,A,student@example.com,9876500000,Mr.,Parent Name,Mrs.,Parent Name,"Udaipur, Rajasthan",,2014-08-01,2026-04-01,O+,',
       "text/csv",
     );
   const inspect = async () => {

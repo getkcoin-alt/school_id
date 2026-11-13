@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { ROLES, createSeed, STORAGE_KEY } from "./data.js";
-import { loadData, saveData, uid } from "./lib.js";
+import { loadData, readPreviewData, saveData, uid } from "./lib.js";
 import {
   Icon,
   IconButton,
@@ -167,8 +167,8 @@ export default function App() {
     const sync = (e) => {
       if (e.key === STORAGE_KEY && e.newValue) {
         try {
-          const next = JSON.parse(e.newValue);
-          if (next.version === 1) setData(next);
+          const next = readPreviewData(e.newValue);
+          if (next) setData(next);
         } catch {}
       }
     };

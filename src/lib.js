@@ -1,12 +1,49 @@
-import { createSeed, FIELDS, STORAGE_KEY } from "./data.js";
+import { createSeed, FIELDS, PARENT_PREFIXES, STORAGE_KEY } from "./data.js";
+export function readPreviewData(serialized) {
+  const stored = JSON.parse(serialized);
+  if (stored?.version !== 1) return null;
+  const data = { ...createSeed(), ...stored };
+  const prefixKeys = Object.keys(PARENT_PREFIXES);
+  if (prefixKeys.every((key) => data.enabledFields.includes(key))) return data;
+  const addPrefixes = (keys) => [...new Set([...keys, ...prefixKeys])];
+  return {
+    ...data,
+    enabledFields: addPrefixes(data.enabledFields),
+    fieldScope: Object.fromEntries(
+      Object.entries(data.fieldScope).map(([school, keys]) => [
+        school,
+        addPrefixes(keys),
+      ]),
+    ),
+  };
+}
 export function loadData() {
   try {
-    const d = JSON.parse(localStorage.getItem(STORAGE_KEY));
-    return d?.version === 1 ? { ...createSeed(), ...d } : createSeed();
+    return readPreviewData(localStorage.getItem(STORAGE_KEY)) || createSeed();
   } catch {
     return createSeed();
   }
 }
+
+export function parentName(student, parent) {
+  const name = student?.[parent]?.trim();
+  const prefix = student?.[`${parent}Prefix`]?.trim();
+  if (!name) return "";
+  if (!prefix || name.toLowerCase().startsWith(`${prefix.toLowerCase()} `))
+    return name;
+  return `${prefix} ${name}`;
+}
+
+function importPrefix(key, value = "") {
+  const comparable = (text) =>
+    text.toLowerCase().replaceAll(".", "").replace(/\s+/g, " ").trim();
+  return (
+    PARENT_PREFIXES[key].find(
+      (option) => comparable(option) === comparable(value),
+    ) || value
+  );
+}
+
 export function saveData(data) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
@@ -75,7 +112,9 @@ export function exportCSV(rows, name = "students.csv") {
     "admission",
     "classNo",
     "section",
+    "fatherPrefix",
     "father",
+    "motherPrefix",
     "mother",
     "email",
     "phone",
@@ -155,7 +194,8 @@ export function parseImport(
       ]),
     );
     const name = r.name || r.studentname || r.fullname;
-    const admission = r.admission || r.admissionnumber || r.admissionno;
+    const admission =
+      r.admission || r.admissionnumber || r.admissionno || r.admno;
     const email = r.email || r.emailaddress;
     if (
       !name ||
@@ -176,10 +216,18 @@ export function parseImport(
       name,
       admission,
       email: email || "",
-      phone: r.phone || r.contactnumber || r.mobilenumber || "",
+      phone: r.phone || r.contactnumber || r.mobilenumber || r.mobile || "",
       classNo: r.class || r.classno || "6",
       section: r.section || "A",
+      fatherPrefix: importPrefix(
+        "fatherPrefix",
+        r.prefixf || r.fatherprefix || r.prefixfather,
+      ),
       father: r.father || r.fathername || r.fathersname || "",
+      motherPrefix: importPrefix(
+        "motherPrefix",
+        r.prefixm || r.motherprefix || r.prefixmother,
+      ),
       mother: r.mother || r.mothername || r.mothersname || "",
       address: r.address || r.residentialaddress || "",
       gender: r.gender || "",
@@ -257,8 +305,8 @@ export async function cardPDF(students, school, design = "Classic") {
     const fields = [
       ["Name", s.name],
       ["Admission", s.admission || s.id],
-      ["Father", s.father],
-      ["Mother", s.mother],
+      ["Father", parentName(s, "father")],
+      ["Mother", parentName(s, "mother")],
       ["Date of birth", s.dob],
       ["Gender", s.gender],
       ["Phone", s.phone],

@@ -5,6 +5,7 @@ import {
   Button,
   Panel,
   Field,
+  ParentPrefixSelect,
   Callout,
   Steps,
   CardPreview,
@@ -376,9 +377,15 @@ export default function StudentPortal({ ctx }) {
                         error={errors[key]}
                         className={key === "address" ? "span-two" : ""}
                       >
-                        {["class", "section", "gender", "blood"].includes(
-                          type,
-                        ) ? (
+                        {key === "fatherPrefix" || key === "motherPrefix" ? (
+                          <ParentPrefixSelect
+                            type={type}
+                            value={draft[key]}
+                            onChange={(value) => change(key, value)}
+                          />
+                        ) : ["class", "section", "gender", "blood"].includes(
+                            type,
+                          ) ? (
                           <select
                             value={draft[key] || ""}
                             onChange={(e) => change(key, e.target.value)}

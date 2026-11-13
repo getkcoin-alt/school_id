@@ -77,7 +77,8 @@ import {
   ChevronLeft,
   RotateCcw,
 } from "lucide-react";
-import { initials, cardPDF } from "./lib.js";
+import { initials, cardPDF, parentName } from "./lib.js";
+import { PARENT_PREFIXES } from "./data.js";
 const icons = {
   arrow: ArrowRight,
   x: X,
@@ -272,6 +273,19 @@ export function Field({
     </label>
   );
 }
+export function ParentPrefixSelect({ type, value = "", onChange }) {
+  const options = PARENT_PREFIXES[type];
+  return (
+    <select value={value} onChange={(e) => onChange(e.target.value)}>
+      <option value="">No prefix</option>
+      {value && !options.includes(value) && <option>{value}</option>}
+      {options.map((option) => (
+        <option key={option}>{option}</option>
+      ))}
+    </select>
+  );
+}
+
 export function SearchBox({ value, onChange, placeholder = "Search…" }) {
   return (
     <div className="search-box">
@@ -448,7 +462,7 @@ export function CardPreview({
       {back ? (
         <div className="id-card-back">
           <strong>In case of emergency</strong>
-          <p>{student?.father || "Parent / guardian"}</p>
+          <p>{parentName(student, "father") || "Parent / guardian"}</p>
           <p>{student?.phone || "Contact number"}</p>
           <div className="rule" />
           <small>{student?.address || school?.address}</small>

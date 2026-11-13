@@ -9,6 +9,8 @@ import {
   approvalError,
   approvedStudent,
   isNotSubmitted,
+  parentName,
+  readPreviewData,
 } from "../src/lib.js";
 test("the preview has no Teacher panel and preserves the two agent tiers", () => {
   assert.deepEqual(
@@ -134,4 +136,62 @@ test("Excel drafts in another session retain their ID details and can go directl
   const approved = approvedStudent(withPhoto);
   assert.ok(eligible(approved));
   assert.equal(approved.invitedAt, undefined);
+});
+
+test("parent prefixes support the GitLab spreadsheet and old preview settings", () => {
+  const seed = createSeed();
+  const legacyFields = seed.enabledFields.filter(
+    (key) => !key.endsWith("Prefix"),
+  );
+  const { enabledFields, fieldScope } = readPreviewData(
+    JSON.stringify({
+      ...seed,
+      enabledFields: legacyFields,
+      fieldScope: { "SCH-001": ["father", "mother"] },
+    }),
+  );
+  assert.ok(enabledFields.includes("fatherPrefix"));
+  assert.ok(enabledFields.includes("motherPrefix"));
+  assert.deepEqual(fieldScope["SCH-001"], [
+    "father",
+    "mother",
+    "fatherPrefix",
+    "motherPrefix",
+  ]);
+  const saved = readPreviewData(
+    JSON.stringify({
+      ...seed,
+      enabledFields,
+      fieldScope: { "SCH-001": ["father", "mother", "motherPrefix"] },
+    }),
+  );
+  assert.equal(saved.fieldScope["SCH-001"].includes("fatherPrefix"), false);
+
+  const {
+    students: [student],
+  } = parseImport(
+    [
+      {
+        NAME: "Sample Student",
+        ADMNO: "NEW-456",
+        MOBILE: "9876512345",
+        PREFIXF: "MR.",
+        FATHER: "Parent One",
+        PREFIXM: "late smt",
+        MOTHER: "Parent Two",
+      },
+    ],
+    "SCH-001",
+    [],
+  );
+  assert.equal(student.fatherPrefix, "Mr.");
+  assert.equal(student.motherPrefix, "Late Smt.");
+  assert.equal(parentName(student, "father"), "Mr. Parent One");
+  assert.equal(parentName(student, "mother"), "Late Smt. Parent Two");
+  assert.equal(
+    parentName({ father: "Mr. Parent One", fatherPrefix: "Mr." }, "father"),
+    "Mr. Parent One",
+  );
+  assert.equal(parentName({ mother: "Parent Two" }, "mother"), "Parent Two");
+  assert.ok(validateStudent({ fatherPrefix: "Mr." }, FIELDS).father);
 });
