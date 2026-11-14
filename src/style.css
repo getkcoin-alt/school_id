@@ -7431,7 +7431,10 @@ input[aria-invalid="true"] { border-color: var(--coral); }
 .custom-field-add .field { flex: 1 1 180px; }
 .link-btn { background: none; border: 0; padding: 0; color: var(--ink); font: inherit; font-weight: 600; cursor: pointer; text-align: left; text-decoration: underline; text-decoration-color: var(--border); text-underline-offset: 3px; }
 .link-btn:hover { color: var(--coral); }
-.order-form { display: grid; gap: 18px; }
+.order-form { display: grid; gap: 18px; align-content: start; }
+.order-terms { font-size: 13px; color: var(--muted); line-height: 1.55; }
+.order-terms ol { padding-left: 18px; margin: 6px 0 0; display: grid; gap: 3px; }
+.choice-field .field-label small { font-weight: 400; }
 .order-section { border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px 18px; margin: 0; }
 .order-section legend { font-weight: 700; padding: 0 6px; }
 .span-2 { grid-column: 1 / -1; }

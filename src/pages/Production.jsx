@@ -1713,7 +1713,8 @@ export function PrintOrders({ ctx }) {
 }
 
 /** Change sheet #6: every panel can upload a school's order form. */
-// The CtC Id Solutions order form, as sections of fields. "choice" fields are radio buttons.
+// The CtC Id Solutions order form, as on the paper form. A list of options is a
+// radio choice; the optional fifth item is a note shown beside the field.
 const ORDER_SECTIONS = [
   {
     title: "School",
@@ -1724,54 +1725,70 @@ const ORDER_SECTIONS = [
       ["address", "Address", "wide"],
       ["contactNo", "Contact no.", "tel"],
       ["email", "Email ID", "email"],
-      ["emailPrint", "Print email on card", ["Yes", "No"]],
+      ["emailPrint", "Email on card", ["To print", "Not to print"]],
       ["website", "Website"],
-      ["websitePrint", "Print website on card", ["Yes", "No"]],
+      ["websitePrint", "Website on card", ["To print", "Not to print"]],
+      ["design", "Design", "wide"],
     ],
   },
   {
     title: "Card",
     fields: [
-      ["design", "Design", ["Same as last year", "Changes in old design", "New design"]],
-      ["schoolLogo", "School logo", ["Same as last year", "New logo attached"]],
-      ["cardType", "Card type", ["PVC card", "Laminated card", "Card with holder"]],
-      ["issuingAuthority", "Issuing authority on card", ["Principal", "Director", "Manager", "None"]],
-      ["signature", "Signature", ["Printed on card", "Not required"]],
-      ["attachment", "Attachment", ["Excel sheet", "Photos", "Excel & photos", "Old card sample"]],
+      ["schoolLogo", "School logo", ["Received", "Not received", "Not applicable"]],
+      ["cardType", "Card type", ["Normal", "Scratch proof"]],
+      ["issuingAuthority", "Issuing authority", ["Director", "Principal", "Head Master", "Head Mistress"]],
+      ["signature", "Signature", ["Received", "Not received", "Not applicable"]],
     ],
   },
   {
-    title: "Lanyard (dori)",
+    title: "Dori (lanyard)",
     fields: [
-      ["doriType", "Dori type", ["Plain", "Printed", "Not required"]],
-      ["doriColour", "Dori colour"],
-      ["printOnDories", "Print on dories"],
-      ["doriCount", "No. of dories", "number"],
+      ["doriType", "Dori type", ["Digital", "Soft", "Mattee", "Border"]],
+      ["doriColour", "Dori colour", ["Royal Blue", "Navy Blue", "Red", "Yellow"], false, "Subject to availability"],
+      ["printOnDories", "Print on dories", "wide"],
+      ["doriCount", "No. of dori", "number", false, "Extra dories must be purchased by the school"],
     ],
   },
   {
-    title: "Card holder",
+    title: "Holder (H. details)",
     fields: [
-      ["holderOrientation", "Holder", ["Vertical", "Horizontal", "Not required"]],
-      ["holderSticky", "Sticky", ["Yes", "No"]],
-      ["holderSides", "Sides", ["Single side", "Both sides"]],
-      ["holderSize", "Size"],
+      ["holderOrientation", "Orientation", ["Horizontal", "Vertical"]],
+      ["holderSticky", "Sticky", ["Sticky", "Non sticky"]],
+      ["holderSides", "Sides", ["Single sided", "Double sided"]],
+      ["holderSize", "Size", ["Small", "Normal"]],
+      ["attachment", "Attachment", ["With hook", "Without hook"]],
     ],
   },
   {
-    title: "Rates & contacts",
+    title: "Staff member (from Sonepat)",
+    note: "18% GST will be applicable on the overall amount.",
     fields: [
-      ["rate", "Rate per card (₹)", "number"],
+      ["staffName", "Name"],
+      ["staffContact", "Contact no.", "tel"],
+      ["rate", "Rate (₹)", "number"],
       ["advance", "Advance (₹)", "number"],
-      ["extraDoriRate", "Extra dori rate (₹)", "number"],
-      ["staffName", "Our staff name"],
-      ["staffContact", "Our staff contact", "tel"],
-      ["authName", "School authority name"],
-      ["authDesignation", "Designation"],
-      ["authContact", "Authority contact", "tel"],
-      ["remarks", "Remarks", "wide"],
+      ["extraDoriRate", "Rate for extra dories (₹)", "number"],
     ],
   },
+  {
+    title: "Authorised person's details",
+    fields: [
+      ["authName", "Name"],
+      ["authDesignation", "Designation"],
+      ["authContact", "Contact no.", "tel"],
+    ],
+  },
+  {
+    title: "Remarks",
+    fields: [["remarks", "Remarks (if any)", "wide"]],
+  },
+];
+const ORDER_TERMS = [
+  "The overall job is expected to be completed within 10 days after finalisation of data.",
+  "CtC will not be responsible for any mistake found after proof reading.",
+  "Colour on card may be in a slightly different shade due to the thermal process.",
+  "Photography will take place two times maximum (if applicable).",
+  "The institution has to provide data and photographs in soft format after two visits of the photographer.",
 ];
 
 const formValue = (v) => (v === true ? "Yes" : v === false ? "No" : v == null || v === "" ? "—" : String(v));
@@ -1784,11 +1801,11 @@ function printOrderForm(f) {
       `<h2>${esc(s.title)}</h2><table>${s.fields
         .map(([k, l, t]) => `<tr><th>${esc(l)}</th><td>${esc(t === "date" && d[k] ? toDMY(d[k]) : formValue(d[k]))}</td></tr>`)
         .join("")}</table>`,
-  ).join("");
+  ).join("") + `<h2>Terms &amp; conditions</h2><ol>${ORDER_TERMS.map((t) => `<li>${esc(t)}</li>`).join("")}</ol>`;
   const w = window.open("", "_blank");
   if (!w) return;
   w.document.write(
-    `<!doctype html><html><head><meta charset="utf-8"><title>Order form · ${esc(f.schoolName)}</title><style>body{font:14px/1.5 system-ui,sans-serif;margin:32px;color:#111}h1{font-size:20px;margin:0 0 4px}h2{font-size:15px;margin:20px 0 6px;border-bottom:1px solid #999}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:5px 8px;border-bottom:1px solid #ddd;vertical-align:top}th{width:40%;font-weight:600}p{color:#555;margin:0}</style></head><body><h1>CtC Id Solutions · ID card order form</h1><p>${esc(f.schoolName)}${f.note ? " · " + esc(f.note) : ""}</p>${body}<script>window.onload=()=>window.print()</script></body></html>`,
+    `<!doctype html><html><head><meta charset="utf-8"><title>Order form · ${esc(f.schoolName)}</title><style>body{font:14px/1.5 system-ui,sans-serif;margin:32px;color:#111}h1{font-size:20px;margin:0 0 4px}h2{font-size:15px;margin:20px 0 6px;border-bottom:1px solid #999}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:5px 8px;border-bottom:1px solid #ddd;vertical-align:top}th{width:40%;font-weight:600}p{color:#555;margin:0}</style></head><body><h1>CtC Id Solutions · ID card order form</h1><p>G-16, City Plaza, Near Axis Bank, Old D.C. Road, Sonipat-131001</p><p>${esc(f.schoolName)}${f.note ? " · " + esc(f.note) : ""}</p>${body}<script>window.onload=()=>window.print()</script></body></html>`,
   );
   w.document.close();
 }
@@ -1810,6 +1827,8 @@ function OrderFormEditor({ ctx, form, schools, onClose }) {
     };
   };
   const [schoolId, setSchoolId] = useState(first);
+  // "fill": the CtC form on screen; "upload": only a scan or photo of a filled paper form.
+  const [mode, setMode] = useState(form && !form.details ? "upload" : "fill");
   const [d, setD] = useState(form?.details || prefill(first));
   const [note, setNote] = useState(form?.note || "");
   const [file, setFile] = useState(null);
@@ -1817,13 +1836,14 @@ function OrderFormEditor({ ctx, form, schools, onClose }) {
   const set = (k, v) => setD((x) => ({ ...x, [k]: v }));
   const save = async (e) => {
     e.preventDefault();
-    if (file && file.size > 10 * 1024 * 1024) return notify("The scan must be under 10 MB.", "error");
-    const details = Object.fromEntries(Object.entries(d).filter(([, v]) => v !== "" && v != null).map(([k, v]) => [k, String(v)]));
+    if (file && file.size > 10 * 1024 * 1024) return notify("The file must be under 10 MB.", "error");
+    if (mode === "upload" && !form && !file) return notify("Choose the filled order form to upload.", "error");
+    const details = mode === "fill" ? Object.fromEntries(Object.entries(d).filter(([, v]) => v !== "" && v != null).map(([k, v]) => [k, String(v)])) : null;
     setBusy(true);
     try {
       if (live) {
-        if (form) await ctx.api.patch(`/media/order-forms/${form.id}`, { details, note });
-        else await ctx.api.upload("/media/order-forms", { schoolId, details: JSON.stringify(details), ...(note ? { note } : {}), ...(file ? { file } : {}) });
+        if (form) await ctx.api.patch(`/media/order-forms/${form.id}`, { ...(details ? { details } : {}), note });
+        else await ctx.api.upload("/media/order-forms", { schoolId, ...(details ? { details: JSON.stringify(details) } : {}), ...(note ? { note } : {}), ...(file ? { file } : {}) });
         await ctx.reload();
       } else
         update((data) => ({
@@ -1841,8 +1861,21 @@ function OrderFormEditor({ ctx, form, schools, onClose }) {
     }
   };
   return (
-    <Modal wide title={form ? "Edit order form" : "New order form"} subtitle="CtC Id Solutions ID card order form. The school sees it read-only." onClose={onClose}>
-      <form onSubmit={save} className="order-form">
+    <Modal wide title={form ? "Edit order form" : "New order form"} subtitle="CtC Id Solutions ID card order form. The school can view and print it but not change it." onClose={onClose}>
+      <form onSubmit={save}>
+        <div className="modal-body order-form">
+        {!form && (
+          <div className="segmented" role="tablist" aria-label="How to add the order form">
+            {[
+              ["fill", "Fill in the form"],
+              ["upload", "Upload a filled form"],
+            ].map(([m, l]) => (
+              <button key={m} type="button" role="tab" aria-selected={mode === m} className={mode === m ? "active" : ""} onClick={() => setMode(m)}>
+                {l}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="form-grid">
           <Field label="School" required>
             <select
@@ -1862,19 +1895,23 @@ function OrderFormEditor({ ctx, form, schools, onClose }) {
             </select>
           </Field>
           {!form && (
-            <Field label="Signed scan (optional)" hint="PDF or photo of the signed paper form">
-              <input type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+            <Field label={mode === "upload" ? "Filled order form" : "Signed scan (optional)"} required={mode === "upload"} hint="PDF or photo, up to 10 MB">
+              <input type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" onChange={(e) => setFile(e.target.files?.[0] || null)} />
             </Field>
           )}
         </div>
-        {ORDER_SECTIONS.map((sec) => (
+        {mode === "fill" && ORDER_SECTIONS.map((sec) => (
           <fieldset key={sec.title} className="order-section">
             <legend>{sec.title}</legend>
+            {sec.note && <p className="muted small-note">{sec.note}</p>}
             <div className="form-grid">
-              {sec.fields.map(([k, l, t, req]) =>
+              {sec.fields.map(([k, l, t, req, hint]) =>
                 Array.isArray(t) ? (
                   <div key={k} className="field choice-field">
-                    <span className="field-label">{l}</span>
+                    <span className="field-label">
+                      {l}
+                      {hint && <small className="muted"> · {hint}</small>}
+                    </span>
                     <div className="choice-row" role="radiogroup" aria-label={l}>
                       {t.map((o) => (
                         <label key={o} className={`choice ${d[k] === o ? "on" : ""}`}>
@@ -1889,7 +1926,7 @@ function OrderFormEditor({ ctx, form, schools, onClose }) {
                     <DateInput value={d[k] || ""} onChange={(v) => set(k, v)} />
                   </Field>
                 ) : (
-                  <Field key={k} label={l} required={req} className={t === "wide" ? "span-2" : undefined}>
+                  <Field key={k} label={l} required={req} hint={hint} className={t === "wide" ? "span-2" : undefined}>
                     {t === "wide" ? (
                       <textarea rows="2" maxLength="500" value={d[k] || ""} onChange={(e) => set(k, e.target.value)} />
                     ) : (
@@ -1901,9 +1938,20 @@ function OrderFormEditor({ ctx, form, schools, onClose }) {
             </div>
           </fieldset>
         ))}
-        <Field label="Internal note (optional)">
+        {mode === "fill" && (
+          <div className="order-terms">
+            <strong>Terms &amp; conditions</strong>
+            <ol>
+              {ORDER_TERMS.map((t) => (
+                <li key={t}>{t}</li>
+              ))}
+            </ol>
+          </div>
+        )}
+        <Field label="Note (optional)">
           <input maxLength="500" value={note} onChange={(e) => setNote(e.target.value)} />
         </Field>
+        </div>
         <div className="modal-actions">
           <Button variant="secondary" type="button" onClick={onClose}>
             Cancel
@@ -1921,11 +1969,13 @@ function OrderFormView({ form, onClose }) {
   const d = form.details || {};
   return (
     <Modal wide title={`Order form · ${form.schoolName}`} subtitle={`Filled on ${fmtDate(form.createdAt)}${form.note ? " · " + form.note : ""}`} onClose={onClose}>
-      {!form.details && <p className="muted">This order form is a scanned file only.</p>}
+      <div className="modal-body">
+      {!form.details && <p className="muted">This order form was uploaded as a file. Open it with the button below.</p>}
       {form.details &&
         ORDER_SECTIONS.map((sec) => (
           <div key={sec.title} className="order-view">
             <h3>{sec.title}</h3>
+            {sec.note && <p className="muted small-note">{sec.note}</p>}
             <dl>
               {sec.fields.map(([k, l, t]) => (
                 <React.Fragment key={k}>
@@ -1936,10 +1986,21 @@ function OrderFormView({ form, onClose }) {
             </dl>
           </div>
         ))}
+      {form.details && (
+        <div className="order-terms">
+          <strong>Terms &amp; conditions</strong>
+          <ol>
+            {ORDER_TERMS.map((t) => (
+              <li key={t}>{t}</li>
+            ))}
+          </ol>
+        </div>
+      )}
+      </div>
       <div className="modal-actions">
         {form.url && (
           <a className="btn secondary" href={form.url} target="_blank" rel="noreferrer">
-            <Icon name="download" size={15} /> Signed scan
+            <Icon name="download" size={15} /> {form.details ? "Signed scan" : "Open order form"}
           </a>
         )}
         {form.details && (
@@ -2005,7 +2066,7 @@ function OrderForms({ ctx }) {
                     </button>
                     {f.note && <small className="block muted">{f.note}</small>}
                   </td>
-                  <td>{f.details?.cardType || (f.fileName ? "Scan only" : "—")}</td>
+                  <td>{f.details?.cardType || (f.fileName ? "Uploaded file" : "—")}</td>
                   <td>{f.details?.doriType ? `${f.details.doriType}${f.details.doriCount ? " · " + f.details.doriCount : ""}` : "—"}</td>
                   <td>{f.details?.date ? toDMY(f.details.date) : fmtDate(f.createdAt)}</td>
                   <td className="row-actions">
