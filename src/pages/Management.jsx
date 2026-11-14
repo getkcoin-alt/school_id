@@ -14,11 +14,17 @@ import {
   Callout,
   Empty,
   DeleteConfirm,
+  DateInput,
 } from "../components.jsx";
 import { auth } from "../api/client.js";
+import { STATES, citiesOf } from "../india.js";
 import {
   uid,
   fmtDate,
+  STAFF_SERVER_FIELDS,
+  STAFF_LOCKED,
+  staffRequiredKeys,
+  toDMY,
   nextSession,
   normaliseSession,
   sessionDates,
@@ -129,18 +135,22 @@ export function SchoolForm({ ctx, value, onClose }) {
           principal: "",
           address: "",
           city: "",
-          state: "Rajasthan",
+          state: "",
           country: "India",
           pin: "",
           agent: ctx.live ? (ctx.role === "super" ? "" : ctx.data.me?.agentId || "") : ctx.role === "regular" ? "AG-002" : "AG-001",
           status: "Active",
-          studentRounds: 1,
-          staffRounds: 1,
+          studentRounds: 3,
+          staffRounds: 3,
           color: "#326b5b",
         },
   );
   const [error, setError] = useState("");
   const set = (k, v) => setS({ ...s, [k]: v });
+  const isCopy = !value?.id && Boolean(value?.copyFrom);
+  const canRounds = ctx.role === "super"; // printing rounds are set by ID Card Studio
+  const cities = citiesOf(s.state);
+  const [otherCity, setOtherCity] = useState(Boolean(s.city) && !cities.includes(s.city));
   const save = (e) => {
     e.preventDefault();
     if (
@@ -177,8 +187,12 @@ export function SchoolForm({ ctx, value, onClose }) {
   return (
     <Modal
       wide
-      title={value ? "Edit school" : "Add a school"}
-      subtitle="Set up the school contact, assigned agent, and card collection rounds."
+      title={value?.id ? "Edit school" : isCopy ? `Copy ${value.copyName}` : "Add a school"}
+      subtitle={
+        isCopy
+          ? `A new school with the same ID card fields, classes, sections and designs as ${value.copyName}. Enter the new school's own name and contact details.`
+          : "Set up the school contact, assigned agent, and card collection rounds."
+      }
       onClose={onClose}
     >
       <form onSubmit={save}>
@@ -190,8 +204,6 @@ export function SchoolForm({ ctx, value, onClose }) {
               ["email", "School email", "email"],
               ["phone", "Contact number", "tel"],
               ["address", "Address"],
-              ["city", "City"],
-              ["state", "State"],
               ["country", "Country"],
               ["pin", "PIN code"],
             ].map(([k, l, t]) => (
@@ -208,6 +220,45 @@ export function SchoolForm({ ctx, value, onClose }) {
                 />
               </Field>
             ))}
+            <Field label="State" required>
+              <select
+                required
+                value={s.state || ""}
+                onChange={(e) => {
+                  setS({ ...s, state: e.target.value, city: "" });
+                  setOtherCity(false);
+                }}
+              >
+                <option value="">Choose a state</option>
+                {STATES.map((st) => (
+                  <option key={st}>{st}</option>
+                ))}
+                {s.state && !STATES.includes(s.state) && <option>{s.state}</option>}
+              </select>
+            </Field>
+            <Field label="City" required hint={s.state ? undefined : "Choose the state first"}>
+              {otherCity ? (
+                <input required value={s.city || ""} placeholder="Type the town or city" onChange={(e) => set("city", e.target.value)} />
+              ) : (
+                <select
+                  required
+                  disabled={!s.state}
+                  value={s.city || ""}
+                  onChange={(e) => {
+                    if (e.target.value === "__other") {
+                      setOtherCity(true);
+                      set("city", "");
+                    } else set("city", e.target.value);
+                  }}
+                >
+                  <option value="">{s.state ? "Choose a city" : "—"}</option>
+                  {cities.map((c) => (
+                    <option key={c}>{c}</option>
+                  ))}
+                  <option value="__other">Other (type it)</option>
+                </select>
+              )}
+            </Field>
             <Field label="Assigned agent">
               <select
                 value={s.agent}
@@ -227,33 +278,37 @@ export function SchoolForm({ ctx, value, onClose }) {
                   ))}
               </select>
             </Field>
-            <Field label="Student printing rounds">
+            <Field label="Student printing rounds" hint={canRounds ? "How many print batches of students per session" : "Set by ID Card Studio"}>
               <input
                 type="number"
                 min="1"
                 max="10"
-                value={s.studentRounds}
+                disabled={!canRounds}
+                value={s.studentRounds ?? 3}
                 onChange={(e) => set("studentRounds", +e.target.value)}
               />
             </Field>
-            <Field label="Staff printing rounds">
+            <Field label="Staff printing rounds" hint={canRounds ? "How many print batches of staff per session" : "Set by ID Card Studio"}>
               <input
                 type="number"
                 min="1"
                 max="10"
-                value={s.staffRounds}
+                disabled={!canRounds}
+                value={s.staffRounds ?? 3}
                 onChange={(e) => set("staffRounds", +e.target.value)}
               />
             </Field>
-            <Field label="School status">
-              <select
-                value={s.status}
-                onChange={(e) => set("status", e.target.value)}
-              >
-                <option>Active</option>
-                <option>Inactive</option>
-              </select>
-            </Field>
+            {ctx.role !== "school" && (
+              <Field label="School status" hint="Inactive schools cannot sign in.">
+                <select
+                  value={s.status}
+                  onChange={(e) => set("status", e.target.value)}
+                >
+                  <option>Active</option>
+                  <option>Inactive</option>
+                </select>
+              </Field>
+            )}
           </div>
           {ctx.live && !value?.id && (
             <div className="form-grid">
@@ -406,8 +461,13 @@ export function Schools({ ctx }) {
                           setEdit({
                             ...s,
                             id: null,
-                            name: s.name + " copy",
+                            name: "",
                             email: "",
+                            phone: "",
+                            principal: "",
+                            address: "",
+                            copyFrom: s.id,
+                            copyName: s.name,
                           })
                         }
                       />
@@ -440,7 +500,7 @@ export function Schools({ ctx }) {
       {edit && (
         <SchoolForm
           ctx={ctx}
-          value={edit.name ? edit : null}
+          value={edit.name || edit.copyFrom ? edit : null}
           onClose={() => setEdit(null)}
         />
       )}
@@ -781,24 +841,17 @@ export function Agents({ ctx }) {
               {edit.type === "Premium" && (
                 <>
                   <Field label="Subscription starts">
-                    <input
+                    <DateInput
                       required
-                      type="date"
                       value={edit.start}
-                      onChange={(e) =>
-                        setEdit({ ...edit, start: e.target.value })
-                      }
+                      onChange={(v) => setEdit({ ...edit, start: v })}
                     />
                   </Field>
                   <Field label="Subscription ends">
-                    <input
+                    <DateInput
                       required
-                      type="date"
-                      min={edit.start}
                       value={edit.end}
-                      onChange={(e) =>
-                        setEdit({ ...edit, end: e.target.value })
-                      }
+                      onChange={(v) => setEdit({ ...edit, end: v })}
                     />
                   </Field>
                 </>
@@ -930,17 +983,29 @@ export function Staff({ ctx }) {
       s.school === school.id &&
       `${s.name} ${s.role}`.toLowerCase().includes(query.toLowerCase()),
   );
+  const staffReq = staffRequiredKeys(data, school.id);
+  const staffOn = (k) => STAFF_LOCKED.includes(k) || (data.staffFieldScope?.[school.id] || STAFF_FIELDS.map((f) => f[0])).includes(k);
+  const staffCustom = data.customFields.filter((f) => f.school === school.id && f.audience === "staff" && f.enabled !== false);
   const save = (e) => {
     e.preventDefault();
+    const missing = [
+      ...STAFF_FIELDS.filter(([k]) => staffOn(k) && staffReq.includes(k) && !String(edit[k] || "").trim()).map(([, l]) => l),
+      ...staffCustom.filter((f) => f.required && !String(edit.custom?.[f.id] || "").trim()).map((f) => f.name),
+    ];
+    if (missing.length) {
+      notify(`Fill the compulsory fields: ${missing.join(", ")}.`, "error");
+      return;
+    }
+    const rec = { ...edit, name: String(edit.name || "").trim().replace(/\s+/g, " ").toUpperCase() };
     update((d) =>
       log(
         {
           ...d,
-          staff: d.staff.some((s) => s.id === edit.id)
+          staff: d.staff.some((s) => s.id === rec.id)
             ? d.staff.map((s) =>
-                s.id === edit.id ? { ...edit, printStatus: "In review" } : s,
+                s.id === rec.id ? { ...rec, printStatus: "In review" } : s,
               )
-            : [...d.staff, edit],
+            : [...d.staff, rec],
         },
         `Saved staff record ${edit.name}`,
         "user",
@@ -1133,9 +1198,13 @@ export function Staff({ ctx }) {
                     data.staffFieldScope?.[school.id] ||
                     STAFF_FIELDS.map((f) => f[0])
                   ).includes(f[0]),
-                ).map(([k, l, t, required]) => (
+                ).map(([k, l, t]) => {
+                  const required = STAFF_LOCKED.includes(k) || staffReq.includes(k);
+                  return (
                   <Field key={k} label={l} required={required}>
-                    {["class", "section", "gender", "role"].includes(t) ? (
+                    {t === "date" ? (
+                      <DateInput value={edit[k] || ""} max={new Date().toISOString().slice(0, 10)} onChange={(v) => setEdit({ ...edit, [k]: v })} />
+                    ) : ["class", "section", "gender", "role"].includes(t) ? (
                       <select
                         required={required}
                         value={edit[k] || ""}
@@ -1159,32 +1228,34 @@ export function Staff({ ctx }) {
                       <input
                         required={required}
                         type={t}
+                        className={k === "name" ? "upper" : undefined}
                         pattern={k === "phone" ? "[6-9][0-9]{9}" : undefined}
                         value={edit[k] || ""}
                         onChange={(e) =>
-                          setEdit({ ...edit, [k]: e.target.value })
+                          setEdit({ ...edit, [k]: k === "name" ? e.target.value.toUpperCase() : e.target.value })
                         }
                       />
                     )}
                   </Field>
-                ))}
-                {data.customFields
-                  .filter(
-                    (f) => f.school === school.id && f.audience === "staff",
-                  )
-                  .map((f) => (
-                    <Field key={f.id} label={f.name}>
-                      <input
-                        value={edit.custom?.[f.id] || ""}
-                        onChange={(e) =>
-                          setEdit({
-                            ...edit,
-                            custom: { ...edit.custom, [f.id]: e.target.value },
-                          })
-                        }
-                      />
+                  );
+                })}
+                {staffCustom.map((f) => {
+                  const set = (v) => setEdit({ ...edit, custom: { ...edit.custom, [f.id]: v } });
+                  return (
+                    <Field key={f.id} label={f.name} required={f.required}>
+                      {f.type === "select" ? (
+                        <select value={edit.custom?.[f.id] || ""} onChange={(e) => set(e.target.value)}>
+                          <option value="">Select {f.name.toLowerCase()}</option>
+                          {(f.options || []).map((o) => (
+                            <option key={o}>{o}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input value={edit.custom?.[f.id] || ""} onChange={(e) => set(e.target.value)} />
+                      )}
                     </Field>
-                  ))}
+                  );
+                })}
                 <Field label="Status">
                   <select
                     value={edit.status}
@@ -1263,10 +1334,28 @@ export function Classes({ ctx }) {
   const [newClass, setNewClass] = useState(""),
     [newSection, setNewSection] = useState("");
   const [edit, setEdit] = useState(null);
+  // Live: classes change on the server (which keeps them in school order and moves
+  // students on a rename), then the workspace reloads.
+  const classRec = (name) => (data.classRecords || []).find((c) => c.name === name);
+  const liveClass = async (fn, ok) => {
+    try {
+      await fn();
+      await ctx.reload();
+      notify(ok);
+      return true;
+    } catch (e) {
+      notify(e.message, "error");
+      return false;
+    }
+  };
   const add = (key, value, clear) => {
     if (!value.trim()) return;
-    if (data[key].includes(value.trim())) {
+    if (data[key].some((x) => x.toLowerCase() === value.trim().toLowerCase())) {
       notify("This already exists.", "error");
+      return;
+    }
+    if (ctx.live && key === "classes") {
+      liveClass(() => ctx.api.post(`/schools/${ctx.school.id}/classes`, { name: value.trim(), sections: data.sections.length ? data.sections : ["A"] }), `Class ${value.trim()} added in its place in the class order.`).then((ok) => ok && clear(""));
       return;
     }
     update((d) => ({ ...d, [key]: [...d[key], value.trim()] }));
@@ -1360,6 +1449,10 @@ export function Classes({ ctx }) {
                         return;
                       }
                       if (!window.confirm(`Delete class ${c}?`)) return;
+                      if (ctx.live && classRec(c)) {
+                        liveClass(() => ctx.api.del(`/schools/${ctx.school.id}/classes/${classRec(c).id}`), `Class ${c} deleted.`);
+                        return;
+                      }
                       update((d) => ({ ...d, classes: d.classes.filter((x) => x !== c) }));
                       notify(`Class ${c} deleted.`);
                     }}
@@ -1367,7 +1460,7 @@ export function Classes({ ctx }) {
                 </span>
               </div>
               <h2>Class {c}</h2>
-              <p>{data.sections.join(" · ")} sections</p>
+              <p>{(classRec(c)?.sections.map((x) => x.name) || data.sections).join(" · ") || "No"} sections</p>
               <div className="class-card-count">
                 <strong>{students.length}</strong>
                 <span>students</span>
@@ -1401,10 +1494,16 @@ export function Classes({ ctx }) {
           <div className="modal-body">
             <Field label="Class name">
               <input
+                autoFocus
                 value={edit.name}
                 onChange={(e) => setEdit({ ...edit, name: e.target.value })}
               />
             </Field>
+            {schoolStudents.some((s) => s.classNo === edit.from) && (
+              <Callout icon="students">
+                {schoolStudents.filter((s) => s.classNo === edit.from).length} students in Class {edit.from} move to the new name. Their approval stays as it is.
+              </Callout>
+            )}
           </div>
           <div className="modal-actions">
             <Button variant="secondary" onClick={() => setEdit(null)}>
@@ -1413,11 +1512,20 @@ export function Classes({ ctx }) {
             <Button
               disabled={!edit.name.trim()}
               onClick={() => {
+                const name = edit.name.trim();
                 if (
-                  edit.name !== edit.from &&
-                  data.classes.includes(edit.name)
+                  name.toLowerCase() !== edit.from.toLowerCase() &&
+                  data.classes.some((c) => c.toLowerCase() === name.toLowerCase())
                 ) {
                   notify("A class with that name exists.", "error");
+                  return;
+                }
+                if (name === edit.from) {
+                  setEdit(null);
+                  return;
+                }
+                if (ctx.live && classRec(edit.from)) {
+                  liveClass(() => ctx.api.patch(`/schools/${ctx.school.id}/classes/${classRec(edit.from).id}`, { name }), `Class ${edit.from} renamed to ${name}.`).then((ok) => ok && setEdit(null));
                   return;
                 }
                 update((d) => ({
@@ -1974,10 +2082,10 @@ export function Sessions({ ctx }) {
               </Field>
               <div />
               <Field label="Starts">
-                <input type="date" required value={start.start} onChange={(e) => setStart({ ...start, start: e.target.value, datesTouched: true })} />
+                <DateInput required value={start.start} onChange={(v) => setStart({ ...start, start: v, datesTouched: true })} />
               </Field>
               <Field label="Ends">
-                <input type="date" required min={start.start} value={start.end} onChange={(e) => setStart({ ...start, end: e.target.value, datesTouched: true })} />
+                <DateInput required min={start.start} value={start.end} onChange={(v) => setStart({ ...start, end: v, datesTouched: true })} />
               </Field>
               <label className="check-label span-two">
                 <input type="checkbox" checked={start.current} onChange={(e) => setStart({ ...start, current: e.target.checked })} />
@@ -2042,10 +2150,10 @@ export function Sessions({ ctx }) {
           <form onSubmit={saveDates}>
             <div className="modal-body form-grid">
               <Field label="Starts">
-                <input type="date" required value={editDates.start || ""} onChange={(e) => setEditDates({ ...editDates, start: e.target.value })} />
+                <DateInput required value={editDates.start || ""} onChange={(v) => setEditDates({ ...editDates, start: v })} />
               </Field>
               <Field label="Ends">
-                <input type="date" required min={editDates.start} value={editDates.end || ""} onChange={(e) => setEditDates({ ...editDates, end: e.target.value })} />
+                <DateInput required min={editDates.start} value={editDates.end || ""} onChange={(v) => setEditDates({ ...editDates, end: v })} />
               </Field>
             </div>
             <div className="modal-actions">
@@ -2067,7 +2175,10 @@ export function Settings({ ctx, onReset }) {
     [editSchool, setEditSchool] = useState(false),
     [extra, setExtra] = useState(""),
     [password, setPassword] = useState(false),
-    [fieldTarget, setFieldTarget] = useState("Student");
+    [fieldTarget, setFieldTarget] = useState("Student"),
+    [extraType, setExtraType] = useState("text"),
+    [extraOptions, setExtraOptions] = useState(""),
+    [extraRequired, setExtraRequired] = useState(false);
   const keys =
     fieldTarget === "Student"
       ? data.fieldScope[school.id] || data.enabledFields
@@ -2192,29 +2303,20 @@ export function Settings({ ctx, onReset }) {
             </Button>
           </div>
           <div className="field-switches">
-            {(fieldTarget === "Student" ? FIELDS : STAFF_FIELDS).map(
-              ([key, label, type, required]) => {
-                const locked =
-                  fieldTarget === "Student"
-                    ? LOCKED_FIELDS.includes(key)
-                    : required;
+            {(fieldTarget === "Student" ? FIELDS : STAFF_FIELDS.filter(([k]) => !ctx.live || STAFF_SERVER_FIELDS.includes(k))).map(
+              ([key, label]) => {
+                const staffMode = fieldTarget === "Staff";
+                const locked = staffMode ? STAFF_LOCKED.includes(key) : LOCKED_FIELDS.includes(key);
                 const printed = locked || keys.includes(key);
-                const compulsory =
-                  locked ||
-                  (fieldTarget === "Student" &&
-                    printed &&
-                    requiredKeys(data, school.id).includes(key));
+                const reqList = staffMode ? staffRequiredKeys(data, school.id) : requiredKeys(data, school.id);
+                const compulsory = locked || (printed && reqList.includes(key));
+                const scopeKey = staffMode ? "staffFieldScope" : "fieldScope";
+                const reqKey = staffMode ? "staffFieldRequired" : "fieldRequired";
                 return (
                   <label key={key} className="field-switch-row">
                     <span>
                       <strong>{label}</strong>
-                      <small>
-                        {!printed
-                          ? "Not printed or collected"
-                          : compulsory
-                            ? "Compulsory"
-                            : "Optional"}
-                      </small>
+                      <small>{!printed ? "Not printed or collected" : compulsory ? "Compulsory" : "Optional"}</small>
                     </span>
                     <span className="field-switch-controls">
                       <span className="switch-caption">On card</span>
@@ -2227,45 +2329,24 @@ export function Settings({ ctx, onReset }) {
                         onChange={() =>
                           update((d) => ({
                             ...d,
-                            [fieldTarget === "Student"
-                              ? "fieldScope"
-                              : "staffFieldScope"]: {
-                              ...(fieldTarget === "Student"
-                                ? d.fieldScope
-                                : d.staffFieldScope),
-                              [school.id]: keys.includes(key)
-                                ? keys.filter((k) => k !== key)
-                                : [...keys, key],
-                            },
+                            [scopeKey]: { ...d[scopeKey], [school.id]: keys.includes(key) ? keys.filter((k) => k !== key) : [...keys, key] },
                           }))
                         }
                       />
-                      {fieldTarget === "Student" && (
-                        <>
-                          <span className="switch-caption">Compulsory</span>
-                          <input
-                            type="checkbox"
-                            role="switch"
-                            aria-label={`Make ${label} compulsory`}
-                            disabled={locked || !printed}
-                            checked={compulsory}
-                            onChange={() =>
-                              update((d) => {
-                                const req = requiredKeys(d, school.id);
-                                return {
-                                  ...d,
-                                  fieldRequired: {
-                                    ...d.fieldRequired,
-                                    [school.id]: req.includes(key)
-                                      ? req.filter((k) => k !== key)
-                                      : [...req, key],
-                                  },
-                                };
-                              })
-                            }
-                          />
-                        </>
-                      )}
+                      <span className="switch-caption">Compulsory</span>
+                      <input
+                        type="checkbox"
+                        role="switch"
+                        aria-label={`Make ${label} compulsory`}
+                        disabled={locked || !printed}
+                        checked={compulsory}
+                        onChange={() =>
+                          update((d) => {
+                            const req = staffMode ? staffRequiredKeys(d, school.id) : requiredKeys(d, school.id);
+                            return { ...d, [reqKey]: { ...d[reqKey], [school.id]: req.includes(key) ? req.filter((k) => k !== key) : [...req, key] } };
+                          })
+                        }
+                      />
                     </span>
                   </label>
                 );
@@ -2275,70 +2356,71 @@ export function Settings({ ctx, onReset }) {
           <div className="padded">
             <h3>Extra school fields</h3>
             <p className="muted">
-              Optional fields for details specific to your school.
+              Your own {fieldTarget === "Staff" ? "staff" : "student"} fields, as free text or a dropdown with your own choices (for example House: Red, Blue, Green, Yellow).
             </p>
             {data.customFields
-              .filter(
-                (f) =>
-                  f.school === school.id &&
-                  (fieldTarget === "Staff"
-                    ? f.audience === "staff"
-                    : f.audience !== "staff"),
-              )
-              .map((f) => (
-                <div className="custom-field" key={f.id}>
-                  <span>{f.name}</span>
-                  <IconButton
-                    icon="trash"
-                    label={"Remove field " + f.name}
-                    onClick={() =>
-                      update((d) => ({
-                        ...d,
-                        customFields: d.customFields.filter(
-                          (x) => x.id !== f.id,
-                        ),
-                      }))
-                    }
-                  />
-                </div>
-              ))}
-            <div className="inline-add">
-              <input
-                value={extra}
-                onChange={(e) => setExtra(e.target.value)}
-                placeholder="e.g. House name"
-                aria-label="Extra school field"
-                maxLength="50"
-              />
+              .filter((f) => f.school === school.id && (fieldTarget === "Staff" ? f.audience === "staff" : f.audience !== "staff"))
+              .map((f) => {
+                const setF = (patch) => update((d) => ({ ...d, customFields: d.customFields.map((x) => (x.id === f.id ? { ...x, ...patch } : x)) }));
+                const on = f.enabled !== false;
+                return (
+                  <div className="custom-field-row" key={f.id}>
+                    <span>
+                      <strong>{f.name}</strong>
+                      <small>
+                        {f.type === "select" ? `Dropdown · ${(f.options || []).join(", ") || "no choices yet"}` : "Text"} · {!on ? "Not collected" : f.required ? "Compulsory" : "Optional"}
+                      </small>
+                    </span>
+                    <span className="field-switch-controls">
+                      <span className="switch-caption">On card</span>
+                      <input type="checkbox" role="switch" aria-label={`Print ${f.name} on the card`} checked={on} onChange={() => setF({ enabled: !on, required: !on ? f.required : false })} />
+                      <span className="switch-caption">Compulsory</span>
+                      <input type="checkbox" role="switch" aria-label={`Make ${f.name} compulsory`} disabled={!on} checked={on && Boolean(f.required)} onChange={() => setF({ required: !f.required })} />
+                      <IconButton icon="trash" label={"Remove field " + f.name} onClick={() => update((d) => ({ ...d, customFields: d.customFields.filter((x) => x.id !== f.id) }))} />
+                    </span>
+                  </div>
+                );
+              })}
+            <div className="custom-field-add">
+              <Field label="Field name">
+                <input value={extra} onChange={(e) => setExtra(e.target.value)} placeholder="e.g. House" aria-label="Extra school field" maxLength="50" />
+              </Field>
+              <Field label="Type">
+                <select value={extraType} onChange={(e) => setExtraType(e.target.value)}>
+                  <option value="text">Text</option>
+                  <option value="select">Dropdown</option>
+                </select>
+              </Field>
+              {extraType === "select" && (
+                <Field label="Choices" hint="Separate with commas">
+                  <input value={extraOptions} onChange={(e) => setExtraOptions(e.target.value)} placeholder="Red, Blue, Green, Yellow" />
+                </Field>
+              )}
+              <label className="check-label">
+                <input type="checkbox" checked={extraRequired} onChange={(e) => setExtraRequired(e.target.checked)} />
+                <span>Compulsory</span>
+              </label>
               <Button
                 variant="secondary"
-                disabled={!extra.trim()}
                 icon="plus"
+                disabled={!extra.trim() || (extraType === "select" && !extraOptions.split(",").some((o) => o.trim()))}
                 onClick={() => {
-                  if (
-                    data.customFields.some(
-                      (f) =>
-                        f.school === school.id &&
-                        f.name.toLowerCase() === extra.trim().toLowerCase(),
-                    )
-                  ) {
+                  if (data.customFields.some((f) => f.school === school.id && f.audience === (fieldTarget === "Staff" ? "staff" : "student") && f.name.toLowerCase() === extra.trim().toLowerCase())) {
                     notify("This extra field already exists.", "error");
                     return;
                   }
+                  const options = extraType === "select" ? [...new Set(extraOptions.split(",").map((o) => o.trim()).filter(Boolean))] : [];
                   update((d) => ({
                     ...d,
                     customFields: [
                       ...d.customFields,
-                      {
-                        id: uid("FIELD"),
-                        school: school.id,
-                        name: extra.trim(),
-                        audience: fieldTarget === "Staff" ? "staff" : "student",
-                      },
+                      { id: uid("FIELD"), school: school.id, name: extra.trim(), audience: fieldTarget === "Staff" ? "staff" : "student", type: extraType, options, enabled: true, required: extraRequired },
                     ],
                   }));
                   setExtra("");
-                  notify("Extra field added to the student form.");
+                  setExtraOptions("");
+                  setExtraRequired(false);
+                  notify(`${extraType === "select" ? "Dropdown" : "Field"} added to the ${fieldTarget === "Staff" ? "staff" : "student"} form.`);
                 }}
               >
                 Add field
@@ -2673,10 +2755,10 @@ export function Activity({ ctx }) {
             </select>
           )}
           <label className="date-filter">
-            From <input type="date" value={filters.from} onChange={(e) => setFilters({ ...filters, from: e.target.value })} />
+            From <DateInput value={filters.from} onChange={(v) => setFilters({ ...filters, from: v })} />
           </label>
           <label className="date-filter">
-            To <input type="date" value={filters.to} onChange={(e) => setFilters({ ...filters, to: e.target.value })} />
+            To <DateInput value={filters.to} onChange={(v) => setFilters({ ...filters, to: v })} />
           </label>
         </div>
       )}

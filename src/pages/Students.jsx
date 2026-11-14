@@ -16,6 +16,7 @@ import {
   CardPreview,
   PDFProofButton,
   DeleteConfirm,
+  DateInput,
 } from "../components.jsx";
 import {
   uid,
@@ -28,6 +29,7 @@ import {
   schoolFieldList,
   optionsFor,
   exportSheet,
+  toDMY,
 } from "../lib.js";
 export function StudentEditor({ ctx, student, onClose, onSaved }) {
   const { data, school, update, notify, log } = ctx;
@@ -60,9 +62,17 @@ export function StudentEditor({ ctx, student, onClose, onSaved }) {
   );
   const [errors, setErrors] = useState({});
   const fields = schoolFieldList(data, school.id);
+  // ID cards print names in capitals, so names are kept that way while typing.
+  const UPPER = new Set(["name", "father", "mother"]);
   const change = (key, val) => {
-    setDraft((d) => ({ ...d, [key]: val }));
+    setDraft((d) => ({ ...d, [key]: UPPER.has(key) && typeof val === "string" ? val.toUpperCase() : val }));
     setErrors((e) => ({ ...e, [key]: null }));
+  };
+  const library = data.photoLibrary.filter((p) => p.school === school.id);
+  const pickLibrary = (p) => {
+    // The file name is the photo number (e.g. DSC_2002.jpg -> DSC_2002).
+    setDraft((d) => ({ ...d, photo: p.src, photoSource: "School photo library", captureAt: null, photoNo: p.name.replace(/\.[a-z0-9]+$/i, "") }));
+    setErrors((e) => ({ ...e, photoNo: null }));
   };
   const save = () => {
     const e = validateStudent(draft, fields);
@@ -72,10 +82,13 @@ export function StudentEditor({ ctx, student, onClose, onSaved }) {
           s.id !== draft.id &&
           s.school === school.id &&
           s.session === draft.session &&
-          s.admission === draft.admission,
+          String(draft.admission || "").trim() &&
+          String(s.admission || "").trim().toLowerCase() === String(draft.admission).trim().toLowerCase(),
       )
     )
       e.admission = "This admission number already exists in this school.";
+    for (const f of data.customFields.filter((f) => f.school === school.id && f.audience !== "staff" && f.enabled !== false && f.required))
+      if (!String(draft.custom?.[f.id] || "").trim()) e["custom:" + f.id] = `${f.name} is required.`;
     if (Object.keys(e).length) {
       setErrors(e);
       notify("Check the highlighted fields.", "error");
@@ -83,7 +96,8 @@ export function StudentEditor({ ctx, student, onClose, onSaved }) {
     }
     const result = {
       ...draft,
-      name: draft.name.trim(),
+      name: draft.name.trim().replace(/\s+/g, " ").toUpperCase(),
+      admission: String(draft.admission || "").trim(),
       status: student
         ? ["Approved", "Submitted for print"].includes(student.status)
           ? "In review"
@@ -139,6 +153,11 @@ export function StudentEditor({ ctx, student, onClose, onSaved }) {
       onClose={onClose}
     >
       <div className="modal-body">
+        {student?.status === "Submitted for print" && (
+          <Callout icon="alert" tone="amber">
+            <strong>This card has already gone for printing.</strong> Changes saved here update the school record only; the card being printed will not change. Saving sends the record back to review.
+          </Callout>
+        )}
         <div className="student-editor-head">
           <Avatar
             name={draft.name || "New student"}
@@ -157,35 +176,7 @@ export function StudentEditor({ ctx, student, onClose, onSaved }) {
             </label>
             <p>JPG, PNG, WebP · max. 15 MB · manual upload</p>
           </div>
-          {data.photoLibrary.filter((p) => p.school === school.id).length >
-            0 && (
-            <Field label="Or choose from school photos">
-              <select
-                defaultValue=""
-                onChange={(e) => {
-                  const p = data.photoLibrary.find(
-                    (p) => p.id === e.target.value,
-                  );
-                  if (p)
-                    setDraft((d) => ({
-                      ...d,
-                      photo: p.src,
-                      photoSource: "School photo library",
-                      captureAt: null,
-                    }));
-                }}
-              >
-                <option value="">Choose a library photo</option>
-                {data.photoLibrary
-                  .filter((p) => p.school === school.id)
-                  .map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-              </select>
-            </Field>
-          )}
+          {library.length > 0 && <LibraryPicker photos={library} onPick={pickLibrary} />}
           {draft.photo && (
             <IconButton
               icon="trash"
@@ -203,7 +194,9 @@ export function StudentEditor({ ctx, student, onClose, onSaved }) {
               error={errors[key]}
               className={key === "address" ? "span-two" : ""}
             >
-              {optionsFor(type, data) ? (
+              {type === "date" ? (
+                <DateInput value={draft[key] || ""} max={key === "dob" ? new Date().toISOString().slice(0, 10) : undefined} onChange={(v) => change(key, v)} />
+              ) : optionsFor(type, data) ? (
                 <select
                   value={draft[key] || ""}
                   onChange={(e) => change(key, e.target.value)}
@@ -217,26 +210,34 @@ export function StudentEditor({ ctx, student, onClose, onSaved }) {
                 <input
                   type={type}
                   value={draft[key] || ""}
+                  className={UPPER.has(key) ? "upper" : undefined}
                   onChange={(e) => change(key, e.target.value)}
                 />
               )}
             </Field>
           ))}
           {data.customFields
-            .filter((f) => f.school === school.id && f.audience !== "staff")
-            .map((f) => (
-              <Field key={f.id} label={f.name}>
-                <input
-                  value={draft.custom?.[f.id] || ""}
-                  onChange={(e) =>
-                    setDraft((d) => ({
-                      ...d,
-                      custom: { ...d.custom, [f.id]: e.target.value },
-                    }))
-                  }
-                />
-              </Field>
-            ))}
+            .filter((f) => f.school === school.id && f.audience !== "staff" && f.enabled !== false)
+            .map((f) => {
+              const set = (v) => {
+                setDraft((d) => ({ ...d, custom: { ...d.custom, [f.id]: v } }));
+                setErrors((e) => ({ ...e, ["custom:" + f.id]: null }));
+              };
+              return (
+                <Field key={f.id} label={f.name} required={f.required} error={errors["custom:" + f.id]}>
+                  {f.type === "select" ? (
+                    <select value={draft.custom?.[f.id] || ""} onChange={(e) => set(e.target.value)}>
+                      <option value="">Select {f.name.toLowerCase()}</option>
+                      {(f.options || []).map((o) => (
+                        <option key={o}>{o}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input value={draft.custom?.[f.id] || ""} onChange={(e) => set(e.target.value)} />
+                  )}
+                </Field>
+              );
+            })}
           <Field label="Record status">
             <select
               value={draft.active ? "Active" : "Inactive"}
@@ -512,6 +513,58 @@ function Downloads({ ctx, rows, query }) {
       : []),
   ];
   return <DownloadMenu options={options} note="Downloads follow the tab, class and status filters you have chosen." />;
+}
+/** School photo library search: type part of a photo number (e.g. 20) to find DSC_2002. */
+function LibraryPicker({ photos, onPick }) {
+  const [q, setQ] = useState(""),
+    [open, setOpen] = useState(false);
+  const term = q.trim().toLowerCase();
+  const hits = photos.filter((p) => !term || p.name.toLowerCase().includes(term)).slice(0, 12);
+  return (
+    <div className="library-picker">
+      <Field label="Or choose from school photos" hint={`${photos.length} photos · type part of the photo number`}>
+        <input
+          value={q}
+          placeholder="e.g. 2002"
+          onFocus={() => setOpen(true)}
+          onBlur={() => setTimeout(() => setOpen(false), 150)}
+          onChange={(e) => {
+            setQ(e.target.value);
+            setOpen(true);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && hits[0]) {
+              e.preventDefault();
+              onPick(hits[0]);
+              setQ(hits[0].name.replace(/\.[a-z0-9]+$/i, ""));
+              setOpen(false);
+            }
+          }}
+        />
+      </Field>
+      {open && (
+        <div className="library-hits" role="listbox">
+          {hits.map((p) => (
+            <button
+              type="button"
+              role="option"
+              key={p.id}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                onPick(p);
+                setQ(p.name.replace(/\.[a-z0-9]+$/i, ""));
+                setOpen(false);
+              }}
+            >
+              <img src={p.src} alt="" loading="lazy" />
+              <span>{p.name.replace(/\.[a-z0-9]+$/i, "")}</span>
+            </button>
+          ))}
+          {!hits.length && <p className="muted">No photo matches “{q}”.</p>}
+        </div>
+      )}
+    </div>
+  );
 }
 export default function Students({ ctx }) {
   const { schoolStudents, update, notify, go, school, log, data } = ctx;
@@ -946,7 +999,7 @@ export default function Students({ ctx }) {
                 {FIELDS.filter((f) => view[f[0]]).map(([key, label]) => (
                   <div key={key}>
                     <dt>{label}</dt>
-                    <dd>{view[key]}</dd>
+                    <dd>{["dob", "admissionDate"].includes(key) ? toDMY(view[key]) : view[key]}</dd>
                   </div>
                 ))}
               </dl>

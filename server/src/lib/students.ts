@@ -56,10 +56,12 @@ export async function serializeStudent(s: Student) {
 }
 
 const text = (max = 120) => z.string().max(max).optional().nullable().transform(keep((v) => clean(v) ?? null));
+/** Names are printed in capitals on ID cards, so they are stored that way. */
+const upperText = (max = 120) => text(max).transform((v) => (typeof v === "string" ? v.toUpperCase() : v));
 
 /** Input accepted from staff screens and from the student portal. */
 export const studentInput = z.object({
-  name: z.string().trim().min(2, "Enter the student's full name.").max(120).optional(),
+  name: z.string().trim().min(2, "Enter the student's full name.").max(120).transform((v) => v.replace(/\s+/g, " ").toUpperCase()).optional(),
   className: z.string().trim().min(1).max(30).optional(),
   section: text(10),
   admissionNo: text(40),
@@ -67,9 +69,9 @@ export const studentInput = z.object({
   photoNo: z.string().max(60).optional().nullable().transform(keep((v) => clean(v)?.replace(/[^A-Za-z0-9_.-]/g, "_") ?? null)),
   rollNo: text(20),
   fatherPrefix: text(20).transform((v) => (v === undefined ? undefined : (fatherPrefix(v ?? undefined) ?? null))),
-  fatherName: text(),
+  fatherName: upperText(),
   motherPrefix: text(20).transform((v) => (v === undefined ? undefined : (motherPrefix(v ?? undefined) ?? null))),
-  motherName: text(),
+  motherName: upperText(),
   dob: z.string().optional().nullable(),
   gender: z.enum(["Male", "Female", "Other"]).optional().nullable(),
   email: z.string().email("Enter a valid email address.").optional().nullable().or(z.literal("")).transform(keep((v) => (v ? v.toLowerCase() : null))),

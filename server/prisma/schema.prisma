@@ -214,8 +214,8 @@ model School {
   agentId          String?
   agent            Agent?       @relation(fields: [agentId], references: [id])
   status           RecordStatus @default(ACTIVE)
-  studentRounds    Int          @default(1)
-  staffRounds      Int          @default(1)
+  studentRounds    Int          @default(3)
+  staffRounds      Int          @default(3)
   studentPermit    Boolean      @default(true)
   staffPermit      Boolean      @default(true)
   studentDesignId  String?
@@ -256,6 +256,8 @@ model SchoolField {
   required  Boolean  @default(false)
   custom    Boolean  @default(false)
   sortOrder Int      @default(0)
+  /// Choices for a custom dropdown field (type "select").
+  options   String[] @default([])
 
   @@unique([schoolId, audience, key])
 }
@@ -445,11 +447,13 @@ model OrderForm {
   school       School      @relation(fields: [schoolId], references: [id], onDelete: Cascade)
   batchId      String?
   batch        PrintBatch? @relation(fields: [batchId], references: [id])
-  fileName     String
-  storageKey   String
-  mime         String
-  size         Int
+  fileName     String?
+  storageKey   String?
+  mime         String?
+  size         Int?
   note         String?
+  /// The CtC order form filled in on screen (card type, dori, rates, ...).
+  details      Json?
   uploadedById String?
   createdAt    DateTime    @default(now())
 

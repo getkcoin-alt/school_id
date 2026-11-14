@@ -73,6 +73,7 @@ export interface ResolvedField {
   locked: boolean;
   column: string;
   aliases: string[];
+  options?: string[];
 }
 
 /** The school's field configuration merged with built-in definitions, in print order. */
@@ -97,7 +98,7 @@ export async function schoolFields(schoolId: string, audience: Audience = "STUDE
     });
   }
   for (const r of rows.filter((x) => x.custom)) {
-    out.push({ key: r.key, label: r.label, type: r.type, enabled: r.enabled, required: r.enabled && r.required, custom: true, locked: false, column: r.label.toUpperCase(), aliases: [r.label.toLowerCase().replace(/[^a-z0-9]/g, "")], order: r.sortOrder });
+    out.push({ key: r.key, label: r.label, type: r.type, enabled: r.enabled, required: r.enabled && r.required, custom: true, locked: false, column: r.label.toUpperCase(), aliases: [r.label.toLowerCase().replace(/[^a-z0-9]/g, "")], options: r.type === "select" ? r.options : undefined, order: r.sortOrder });
   }
   return out.sort((a, b) => a.order - b.order).map(({ order: _o, ...f }) => f);
 }

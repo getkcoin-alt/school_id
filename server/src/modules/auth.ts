@@ -62,7 +62,7 @@ export async function authRoutes(app: FastifyInstance) {
 
   app.post("/login", strict, async (req, reply) => {
     const body = z.object({ email: z.string().email("Enter a valid email address."), password: z.string().min(1) }).parse(req.body);
-    const user = await prisma.user.findUnique({ where: { email: normaliseEmail(body.email) }, include: { agent: true } });
+    const user = await prisma.user.findUnique({ where: { email: normaliseEmail(body.email) }, include: { agent: true, school: true } });
     const fail = unauthorized("Email or password is incorrect.");
     if (!user || !user.passwordHash) throw fail;
     if (user.lockedUntil && user.lockedUntil > new Date())
@@ -76,7 +76,8 @@ export async function authRoutes(app: FastifyInstance) {
       throw fail;
     }
     if (user.status === "DISABLED") throw forbidden("This account is disabled. Contact ID Card Studio.");
-    if (user.agent && (user.agent.status !== "ACTIVE" || user.agent.deletedAt)) throw forbidden("This agent account is inactive.");
+    if (user.agent && (user.agent.status !== "ACTIVE" || user.agent.deletedAt)) throw forbidden("This agent account is inactive. Contact ID Card Studio.");
+    if (user.school && (user.school.status !== "ACTIVE" || user.school.deletedAt)) throw forbidden("This school account is inactive. Contact your agent or ID Card Studio.");
     if (user.agent?.subscriptionEnd && user.agent.subscriptionEnd < new Date(new Date().toDateString()))
       throw forbidden("Your subscription has ended. Contact ID Card Studio to renew.");
     await prisma.user.update({ where: { id: user.id }, data: { failedLogins: 0, lockedUntil: null, lastLoginAt: new Date(), status: "ACTIVE" } });
@@ -97,8 +98,11 @@ export async function authRoutes(app: FastifyInstance) {
       await prisma.refreshToken.updateMany({ where: { familyId: row.familyId, revokedAt: null }, data: { revokedAt: new Date() } });
       throw unauthorized("Your session has ended. Sign in again.");
     }
-    const user = await prisma.user.findUnique({ where: { id: row.userId } });
-    if (!user || user.status !== "ACTIVE") throw unauthorized();
+    const user = await prisma.user.findUnique({ where: { id: row.userId }, include: { agent: true, school: true } });
+    if (!user || (user.status !== "ACTIVE" && !(row.impersonatorId && user.status === "INVITED"))) throw unauthorized();
+    // An inactive school or agent can no longer stay signed in (a super admin may still open it).
+    if (!row.impersonatorId && ((user.agent && (user.agent.status !== "ACTIVE" || user.agent.deletedAt)) || (user.school && (user.school.status !== "ACTIVE" || user.school.deletedAt))))
+      throw unauthorized("This account is inactive. Contact ID Card Studio.");
     await prisma.refreshToken.update({ where: { id: row.id }, data: { revokedAt: new Date() } });
     return issueSession(req, reply, row.userId, { familyId: row.familyId, impersonatorId: row.impersonatorId ?? undefined });
   });

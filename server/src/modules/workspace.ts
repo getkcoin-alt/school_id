@@ -7,6 +7,8 @@ import { serializeAgent } from "./agents.js";
 import { schoolFields } from "../lib/fields.js";
 import { PREFIXES } from "../lib/students.js";
 import { isoDate } from "../lib/normalize.js";
+import { classRank } from "../lib/session.js";
+import { fileUrl } from "../lib/storage.js";
 
 /**
  * One round trip to start a session in the web app: who I am, what I may do,
@@ -42,7 +44,10 @@ export async function workspaceRoutes(app: FastifyInstance) {
       school = {
         ...(await serializeSchool(selected)),
         fields: { student: studentFields, staff: staffFields },
-        classes: classes.map((c) => ({ id: c.id, name: c.name, sections: c.sections.map((s) => ({ id: s.id, name: s.name })) })),
+        classes: classes
+          .map((c, i) => ({ c, i }))
+          .sort((a, b) => classRank(a.c.name) - classRank(b.c.name) || a.i - b.i)
+          .map(({ c }) => ({ id: c.id, name: c.name, sections: c.sections.map((s) => ({ id: s.id, name: s.name })) })),
         sessions: sessions.map((s) => ({ id: s.id, name: s.name, startDate: isoDate(s.startDate), endDate: isoDate(s.endDate), isCurrent: s.isCurrent })),
         staffRoles: staffRoles.map((r) => r.name),
         counts: Object.fromEntries(counts.map((c) => [c.status, c._count])),
@@ -53,7 +58,7 @@ export async function workspaceRoutes(app: FastifyInstance) {
       permissions: Object.fromEntries(Object.entries(can).map(([k, fn]) => [k, fn(p)])),
       schools: await Promise.all(schools.map(async (s) => ({ ...(await serializeSchool(s)), studentCount: perSchool.get(s.id) ?? 0 }))),
       agents: await Promise.all(agents.map(serializeAgent)),
-      designs: designs.map((d) => ({ id: d.id, code: d.code, name: d.name, kind: d.kind, audience: d.audience, color: d.color })),
+      designs: await Promise.all(designs.map(async (d) => ({ id: d.id, code: d.code, name: d.name, kind: d.kind, audience: d.audience, color: d.color, agentId: d.agentId, frontUrl: await fileUrl(d.frontKey) }))),
       school,
       prefixes: PREFIXES,
       unreadNotifications: unread,

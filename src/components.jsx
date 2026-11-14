@@ -71,7 +71,7 @@ import {
   ChevronLeft,
   RotateCcw,
 } from "lucide-react";
-import { initials, cardPDF } from "./lib.js";
+import { initials, cardPDF, toDMY, fromDMY } from "./lib.js";
 const icons = {
   eyeOff: EyeOff,
   logOut: LogOut,
@@ -442,6 +442,50 @@ export function DeleteConfirm({ ctx, path, title, subtitle, confirmText, deleteL
         </Button>
       </div>
     </Modal>
+  );
+}
+/**
+ * Date box that always reads and writes dd-mm-yyyy (the format used on ID cards),
+ * while the value passed in and out stays ISO (yyyy-mm-dd). Dashes are added as
+ * you type; an incomplete or impossible date reports "".
+ */
+export function DateInput({ value, onChange, max, ...rest }) {
+  const [text, setText] = useState(toDMY(value));
+  const [bad, setBad] = useState(false);
+  useEffect(() => {
+    if ((fromDMY(text) || "") !== (value || "")) setText(toDMY(value));
+  }, [value]);
+  const type = (raw) => {
+    // "9-" or "9/" means day 09: pad parts the person closed with a separator.
+    const parts = raw.split(/[-/.]/);
+    const digits = parts
+      .map((p, i) => (i < parts.length - 1 && i < 2 && p.length === 1 ? "0" + p : p))
+      .join("")
+      .replace(/[^0-9]/g, "")
+      .slice(0, 8);
+    const next = [digits.slice(0, 2), digits.slice(2, 4), digits.slice(4, 8)].filter(Boolean).join("-") + (/[-/.]$/.test(raw) && digits.length && digits.length < 8 && digits.length % 2 === 0 ? "-" : "");
+    setText(next);
+    const iso = fromDMY(next);
+    setBad(false);
+    onChange(iso || "");
+  };
+  return (
+    <input
+      {...rest}
+      type="text"
+      inputMode="numeric"
+      placeholder="dd-mm-yyyy"
+      maxLength={10}
+      value={text}
+      aria-invalid={bad || undefined}
+      onChange={(e) => type(e.target.value)}
+      onBlur={() => {
+        const iso = fromDMY(text);
+        const tooLate = iso && max && iso > max;
+        setBad(Boolean(text) && (!iso || tooLate));
+        if (iso) setText(toDMY(iso));
+      }}
+    />
   );
 }
 export function CardPreview({

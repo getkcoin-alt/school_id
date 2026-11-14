@@ -98,7 +98,7 @@ export async function studentRoutes(app: FastifyInstance) {
   app.post("/", async (req) => {
     const p = principal(req);
     require(can.editStudents(p));
-    const body = studentInput.extend({ schoolId: z.string().optional(), name: z.string().trim().min(2, "Enter the student's full name."), className: z.string().trim().min(1, "Choose a class.") }).parse(req.body);
+    const body = studentInput.extend({ schoolId: z.string().optional(), name: z.string().trim().min(2, "Enter the student's full name.").transform((v) => v.replace(/\s+/g, " ").toUpperCase()), className: z.string().trim().min(1, "Choose a class.") }).parse(req.body);
     const school = await targetSchool(p, body.schoolId);
     const { schoolId: _s, ...input } = body;
     const data = toData(input);
@@ -314,7 +314,10 @@ export async function studentRoutes(app: FastifyInstance) {
       if (Object.values(mapped).every((v) => v === null || v === undefined)) continue;
       if (mapped.gender) mapped.gender = /^f/i.test(String(mapped.gender)) ? "Female" : /^m/i.test(String(mapped.gender)) ? "Male" : "Other";
       if (mapped.section) mapped.section = String(mapped.section).toUpperCase();
-      const parsed = studentInput.extend({ name: z.string().trim().min(2, "Name is missing."), className: z.string().trim().min(1, "Class is missing.") }).safeParse({ ...mapped, extra });
+      // Prefixes left empty in the sheet default to Mr. / Mrs.
+      if (mapped.fatherName && !mapped.fatherPrefix) mapped.fatherPrefix = "Mr.";
+      if (mapped.motherName && !mapped.motherPrefix) mapped.motherPrefix = "Mrs.";
+      const parsed = studentInput.extend({ name: z.string().trim().min(2, "Name is missing.").transform((v) => v.replace(/\s+/g, " ").toUpperCase()), className: z.string().trim().min(1, "Class is missing.") }).safeParse({ ...mapped, extra });
       if (!parsed.success) {
         invalid.push({ row: rowNo, name: mapped.name as string, reason: parsed.error.issues[0].message });
         continue;

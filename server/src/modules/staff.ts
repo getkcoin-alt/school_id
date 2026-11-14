@@ -41,7 +41,7 @@ export async function serializeStaff(s: Staff) {
 
 const t = z.string().optional().nullable().transform(keep((v) => clean(v) ?? null));
 const staffInput = z.object({
-  name: z.string().trim().min(2, "Enter the staff member's name.").optional(),
+  name: z.string().trim().min(2, "Enter the staff member's name.").transform((v) => v.replace(/\s+/g, " ").toUpperCase()).optional(),
   role: t,
   email: z.string().email("Enter a valid email address.").optional().nullable().or(z.literal("")).transform(keep((v) => (v ? v.toLowerCase() : null))),
   phone: z.string().optional().nullable().transform(keep((v) => normalizePhone(v ?? undefined) ?? null)).refine((v) => validPhone(v ?? undefined), "Enter a valid 10-digit mobile number."),
@@ -89,7 +89,7 @@ export async function staffRoutes(app: FastifyInstance) {
   app.post("/", async (req) => {
     const p = principal(req);
     require(can.editStudents(p));
-    const body = staffInput.extend({ schoolId: z.string().optional(), name: z.string().trim().min(2, "Enter the staff member's name.") }).parse(req.body);
+    const body = staffInput.extend({ schoolId: z.string().optional(), name: z.string().trim().min(2, "Enter the staff member's name.").transform((v) => v.replace(/\s+/g, " ").toUpperCase()) }).parse(req.body);
     const school = await targetSchool(p, body.schoolId);
     const { schoolId: _s, ...input } = body;
     const staff = await prisma.staff.create({

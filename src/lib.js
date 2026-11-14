@@ -270,7 +270,7 @@ export async function cardPDF(students, school, design = "Classic") {
       ["Admission", s.admission || s.id],
       ["Father", s.father],
       ["Mother", s.mother],
-      ["Date of birth", s.dob],
+      ["Date of birth", toDMY(s.dob)],
       ["Gender", s.gender],
       ["Phone", s.phone],
       ["Email", s.email],
@@ -325,7 +325,7 @@ function rasterPhoto(src) {
     img.src = src;
   });
 }
-export const STAGES = ["In progress", "Printed", "Delivered"];
+export const STAGES = ["Submitted", "In progress", "Printed", "Delivered"];
 
 /** The school's printed fields with its own compulsory/optional choices (change sheet #11). */
 export function schoolFieldList(data, schoolId) {
@@ -391,4 +391,28 @@ export function nextSession(names) {
   if (!years.length) return academicYear();
   const y = Math.max(...years) + 1;
   return `${y}–${String((y + 1) % 100).padStart(2, "0")}`;
+}
+
+/** "2015-12-09" (or a Date) -> "09-12-2015"; other values pass through. */
+export function toDMY(v) {
+  if (!v) return "";
+  if (v instanceof Date) v = v.toISOString();
+  const m = String(v).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? `${m[3]}-${m[2]}-${m[1]}` : String(v);
+}
+/** "09-12-2015", "9/12/2015" or "09.12.2015" -> "2015-12-09"; null when not a real date. */
+export function fromDMY(v) {
+  const m = String(v || "").trim().match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
+  if (!m) return null;
+  const [d, mo, y] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const date = new Date(Date.UTC(y, mo - 1, d));
+  if (date.getUTCFullYear() !== y || date.getUTCMonth() !== mo - 1 || date.getUTCDate() !== d) return null;
+  return `${y}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+
+/** Staff fields on the server, and the ones that must always be filled. */
+export const STAFF_SERVER_FIELDS = ["name", "role", "phone", "email", "address", "gender", "dob", "classNo", "section"];
+export const STAFF_LOCKED = ["name", "role"];
+export function staffRequiredKeys(data, schoolId) {
+  return data.staffFieldRequired?.[schoolId] || ["name", "role", "email", "phone", "address"];
 }

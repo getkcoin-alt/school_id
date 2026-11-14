@@ -14,7 +14,7 @@ function Shell({ title, subtitle, children }) {
         {subtitle && <p className="muted">{subtitle}</p>}
         {children}
       </div>
-      <p className="auth-foot">ID Card Studio · School identity, simplified.</p>
+      <p className="auth-foot">Software is powered by CTC. All rights reserved.</p>
     </div>
   );
 }
@@ -82,6 +82,18 @@ export function Login() {
           <Field label={mode === "reset" ? "New password" : "Password"} required>
             <PasswordInput value={password} onChange={setPassword} autoComplete={mode === "reset" ? "new-password" : "current-password"} />
           </Field>
+        )}
+        {mode === "login" && (
+          <details className="login-terms">
+            <summary>By signing in you agree to the terms and conditions</summary>
+            <ol>
+              <li>Accounts are for the school, agent or staff they were issued to. Keep your password private.</li>
+              <li>Student and staff details and photos are used only to make ID cards and are not shared with anyone else.</li>
+              <li>The school is responsible for checking every card's details before it goes for printing. Cards already sent for printing cannot be changed.</li>
+              <li>Printing rounds, rates and delivery follow the order form agreed with CTC Id Solutions.</li>
+              <li>Accounts may be made inactive for misuse or unpaid dues.</li>
+            </ol>
+          </details>
         )}
         <Button type="submit" disabled={busy}>
           {busy ? "Please wait…" : mode === "login" ? "Sign in" : mode === "forgot" ? "Send code" : "Save password"}

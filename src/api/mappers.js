@@ -185,6 +185,9 @@ export const fromBatch = (b) => ({
   rawName: b.name,
   school: b.schoolId,
   count: b.studentCount + b.staffCount,
+  studentCount: b.studentCount,
+  staffCount: b.staffCount,
+  kind: b.staffCount && !b.studentCount ? "Staff" : "Students",
   studentIds: [],
   staffIds: [],
   snapshot: null, // loaded on demand
@@ -200,7 +203,7 @@ export const fromBatch = (b) => ({
 export const fromPdf = (u) => ({ id: u.id, school: u.schoolId, name: u.fileName, pages: u.pages || 0, status: { READY_FOR_REVIEW: "Ready for review", REVIEWED: "Reviewed", REJECTED: "Rejected" }[u.status], date: u.createdAt?.slice(0, 10), note: u.note || "", url: u.url || "", agent: u.agentName });
 export const pdfStatusToApi = { "Ready for review": "READY_FOR_REVIEW", Reviewed: "REVIEWED", Rejected: "REJECTED" };
 
-export const fromDesign = (d) => ({ id: d.id, name: d.name, kind: d.kind === "LANYARD" ? "Lanyard" : "ID card", audience: title(d.audience), color: d.color || "#326b5b" });
+export const fromDesign = (d) => ({ id: d.id, name: d.name, kind: d.kind === "LANYARD" ? "Lanyard" : "ID card", audience: title(d.audience), color: d.color || "#326b5b", fileData: d.frontUrl || null, agentId: d.agentId || null });
 
 export const fromActivity = (l) => ({
   id: l.id,

@@ -104,7 +104,7 @@ describe("student data (sample sheet)", () => {
     expect(body.created).toBe(3);
     expect(body.skipped).toHaveLength(1);
     expect(body.invalid).toHaveLength(1);
-    const amit = await prisma.student.findFirstOrThrow({ where: { name: "amit" } });
+    const amit = await prisma.student.findFirstOrThrow({ where: { name: "AMIT" } });
     expect(amit.fatherPrefix).toBe("Sh.");
     expect(amit.motherPrefix).toBe("Smt.");
     expect(amit.phone).toBe("9494949494");
@@ -269,19 +269,31 @@ describe("printing", () => {
 
   it("moves production forward only for the printer", async () => {
     expect((await api(app, ctx.school).patch(`/batches/${ctx.batch}`, { status: "IN_PROGRESS" })).statusCode).toBe(403);
-    expect((await api(app, ctx.premium).patch(`/batches/${ctx.batch}`, { status: "DELIVERED" })).statusCode).toBe(400);
-    for (const status of ["IN_PROGRESS", "PRINTED"]) expect((await api(app, ctx.premium).patch(`/batches/${ctx.batch}`, { status })).statusCode).toBe(200);
+    // The printer can jump ahead (Submitted -> Printed) but not cancel a printed batch.
+    expect((await api(app, ctx.premium).patch(`/batches/${ctx.batch}`, { status: "PRINTED" })).statusCode).toBe(200);
+    expect((await api(app, ctx.premium).patch(`/batches/${ctx.batch}`, { status: "CANCELLED" })).statusCode).toBe(400);
     const done = await api(app, root).patch(`/batches/${ctx.batch}`, { status: "DELIVERED", carrier: "DTDC", tracking: "D123" });
     expect(done.json().status).toBe("DELIVERED");
   });
 
-  it("accepts order forms from every panel", async () => {
+  it("takes CtC order forms from the agent and super admin, shown to the school", async () => {
     const pdf = Buffer.from("%PDF-1.4\n1 0 obj<</Type /Page>>endobj\n%%EOF");
-    for (const t of [ctx.school, ctx.premium, root]) {
-      const r = await api(app, t).multipart("/media/order-forms", [{ name: "schoolId", data: ctx.schoolId }, { name: "file", filename: "order.pdf", type: "application/pdf", data: pdf }]);
+    const file = { name: "file", filename: "order.pdf", type: "application/pdf", data: pdf };
+    expect((await api(app, ctx.school).multipart("/media/order-forms", [{ name: "schoolId", data: ctx.schoolId }, file])).statusCode).toBe(403);
+    for (const t of [ctx.premium, root]) {
+      const r = await api(app, t).multipart("/media/order-forms", [{ name: "schoolId", data: ctx.schoolId }, file]);
       expect(r.statusCode).toBe(200);
     }
-    expect((await api(app, ctx.school).get("/media/order-forms")).json().items).toHaveLength(3);
+    const details = { cardType: "Scratch Proof", doriType: "Digital", doriColour: "Royal Blue", doriCount: "450", rate: "35", emailPrint: true };
+    const filled = await api(app, ctx.premium).multipart("/media/order-forms", [{ name: "schoolId", data: ctx.schoolId }, { name: "details", data: JSON.stringify(details) }]);
+    expect(filled.statusCode).toBe(200);
+    expect(filled.json().details.doriColour).toBe("Royal Blue");
+    expect(filled.json().url).toBeNull();
+    const seen = (await api(app, ctx.school).get("/media/order-forms")).json().items;
+    expect(seen).toHaveLength(3);
+    expect((await api(app, ctx.school).del(`/media/order-forms/${filled.json().id}`)).statusCode).toBe(403);
+    const edited = await api(app, ctx.premium).patch(`/media/order-forms/${filled.json().id}`, { details: { ...details, rate: "38" } });
+    expect(edited.json().details.rate).toBe("38");
   });
 });
 
@@ -304,7 +316,7 @@ describe("super admin access and activity logs", () => {
     const asSchool = imp.json().accessToken;
     expect((await api(app, asSchool).get("/auth/me")).json().impersonatedBy.name).toBe("Root Admin");
     await api(app, asSchool).post("/students", { name: "Added By Root", className: "VI" });
-    const log = await prisma.activityLog.findFirstOrThrow({ where: { action: "student.created", summary: { contains: "Added By Root" } } });
+    const log = await prisma.activityLog.findFirstOrThrow({ where: { action: "student.created", summary: { contains: "ADDED BY ROOT" } } });
     expect(log.impersonatorId).not.toBeNull();
     expect((await api(app, ctx.school).post("/auth/impersonate", { userId: users[0].id })).statusCode).toBe(403);
     expect((await api(app, asSchool).post("/auth/password/change", { currentPassword: PASSWORD, newPassword: "Another123" })).statusCode).toBe(403);
@@ -346,9 +358,60 @@ describe("partial updates", () => {
   it("leaves fields that were not sent untouched", async () => {
     const st = await api(app, ctx.school).post("/students", { name: "Partial Kid", className: "VI", fatherPrefix: "Mr.", fatherName: "Ram", phone: "9876501234", email: "pk@test.in" });
     const r = await api(app, ctx.school).patch(`/students/${st.json().id}`, { section: "B" });
-    expect(r.json()).toMatchObject({ section: "B", fatherPrefix: "Mr.", fatherName: "Ram", phone: "9876501234", email: "pk@test.in" });
+    expect(r.json()).toMatchObject({ section: "B", fatherPrefix: "Mr.", fatherName: "RAM", phone: "9876501234", email: "pk@test.in" });
+    expect(st.json().name).toBe("PARTIAL KID");
     const cleared = await api(app, ctx.school).patch(`/students/${st.json().id}`, { email: "" });
     expect(cleared.json().email).toBeNull();
+  });
+});
+
+describe("school rules", () => {
+  it("allows many students without an admission number", async () => {
+    for (const name of ["no adm one", "no adm two"]) {
+      const r = await api(app, ctx.school).post("/students", { name, className: "VI", admissionNo: "" });
+      expect(r.statusCode).toBe(200);
+      expect(r.json().admissionNo).toBeNull();
+    }
+  });
+
+  it("keeps classes in natural order after deleting and adding one again", async () => {
+    const add = (name: string) => api(app, ctx.school).post(`/schools/${ctx.schoolId}/classes`, { name, sections: ["A"] });
+    for (const n of ["III", "I", "II"]) await add(n);
+    const iii = (await api(app, ctx.school).get(`/schools/${ctx.schoolId}/classes`)).json().items.find((c: { name: string }) => c.name === "III");
+    expect((await api(app, ctx.school).del(`/schools/${ctx.schoolId}/classes/${iii.id}`)).statusCode).toBe(200);
+    expect((await add("III")).statusCode).toBe(200);
+    expect((await add("iii")).statusCode).toBe(409);
+    const names = (await api(app, ctx.school).get(`/schools/${ctx.schoolId}/classes`)).json().items.map((c: { name: string }) => c.name);
+    const idx = (n: string) => names.indexOf(n);
+    expect(idx("I")).toBeLessThan(idx("II"));
+    expect(idx("II")).toBeLessThan(idx("III"));
+    expect(idx("III")).toBeLessThan(idx("VI"));
+  });
+
+  it("puts students and staff in separate batches and reports rounds", async () => {
+    const r = (await api(app, ctx.school).get("/batches/rounds")).json();
+    expect(r.student.allowed).toBeGreaterThan(0);
+    expect(typeof r.student.used).toBe("number");
+    const mixed = await api(app, ctx.school).post("/batches", { studentIds: ["x"], staffIds: ["y"] });
+    expect(mixed.statusCode).toBe(400);
+  });
+
+  it("signs out an inactive school until it is active again", async () => {
+    const t = await login(app, "head@gsss.test");
+    expect((await api(app, root).patch(`/schools/${ctx.schoolId}`, { status: "INACTIVE" })).statusCode).toBe(200);
+    expect((await api(app, t).get("/workspace")).statusCode).toBe(401);
+    expect((await api(app).post("/auth/login", { email: "head@gsss.test", password: PASSWORD })).statusCode).toBe(403);
+    await api(app, root).patch(`/schools/${ctx.schoolId}`, { status: "ACTIVE" });
+    ctx.school = await login(app, "head@gsss.test");
+  });
+
+  it("stores dropdown choices for custom fields", async () => {
+    const cur = (await api(app, ctx.school).get(`/schools/${ctx.schoolId}/fields`)).json().staff;
+    const fields = [...cur.map((f: { key: string; label: string; enabled: boolean; required: boolean; custom: boolean; type: string }) => ({ key: f.key, label: f.label, enabled: f.enabled, required: f.required, custom: f.custom, type: f.type })), { label: "House", enabled: true, required: true, custom: true, type: "select", options: ["Red", "Blue", "Red"] }];
+    const r = await api(app, ctx.school).put(`/schools/${ctx.schoolId}/fields`, { audience: "STAFF", fields });
+    const house = r.json().fields.find((f: { label: string }) => f.label === "House");
+    expect(house.options).toEqual(["Red", "Blue"]);
+    expect(house.required).toBe(true);
   });
 });
 

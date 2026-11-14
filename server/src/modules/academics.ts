@@ -6,7 +6,14 @@ import { badRequest, conflict, notFound } from "../lib/errors.js";
 import { accessSchool, isAgent, isSchool, isSuper, principal, require, schoolWhere } from "../lib/access.js";
 import { audit } from "../lib/audit.js";
 import { isoDate, parseDate } from "../lib/normalize.js";
-import { nextSession, normaliseSession, sessionDates } from "../lib/session.js";
+import { classRank, nextSession, normaliseSession, sessionDates } from "../lib/session.js";
+
+/** Keeps a school's classes in natural order (Nursery, LKG, UKG, I … XII), whatever order they were added in. */
+async function reorderClasses(tx: Prisma.TransactionClient, schoolId: string) {
+  const rows = await tx.schoolClass.findMany({ where: { schoolId }, orderBy: [{ sortOrder: "asc" }, { name: "asc" }] });
+  const sorted = rows.map((r, i) => ({ r, i })).sort((a, b) => classRank(a.r.name) - classRank(b.r.name) || a.i - b.i);
+  for (const [i, { r }] of sorted.entries()) if (r.sortOrder !== i + 1) await tx.schoolClass.update({ where: { id: r.id }, data: { sortOrder: i + 1 } });
+}
 
 /** Sessions, classes, sections and staff roles, all nested under a school. */
 export async function academicRoutes(app: FastifyInstance) {
@@ -121,10 +128,14 @@ export async function academicRoutes(app: FastifyInstance) {
     require(canEdit(p));
     const school = await accessSchool(p, (req.params as { id: string }).id);
     const body = z.object({ name: z.string().trim().min(1).max(30), sections: z.array(z.string().trim().min(1).max(10)).default(["A"]) }).parse(req.body);
-    const max = await prisma.schoolClass.aggregate({ where: { schoolId: school.id }, _max: { sortOrder: true } });
-    const cls = await prisma.schoolClass.create({
-      data: { schoolId: school.id, name: body.name, sortOrder: (max._max.sortOrder ?? 0) + 1, sections: { create: [...new Set(body.sections.map((s) => s.toUpperCase()))].map((name) => ({ name })) } },
-      include: { sections: true },
+    if (await prisma.schoolClass.findFirst({ where: { schoolId: school.id, name: { equals: body.name, mode: "insensitive" } } })) throw conflict(`Class ${body.name} already exists.`);
+    const cls = await prisma.$transaction(async (tx) => {
+      const created = await tx.schoolClass.create({
+        data: { schoolId: school.id, name: body.name, sortOrder: 9999, sections: { create: [...new Set(body.sections.map((s) => s.toUpperCase()))].map((name) => ({ name })) } },
+        include: { sections: true },
+      });
+      await reorderClasses(tx, school.id);
+      return created;
     });
     await audit(req, { action: "class.created", summary: `${p.name} added class ${cls.name}`, schoolId: school.id, entityType: "class", entityId: cls.id });
     return cls;
@@ -139,12 +150,15 @@ export async function academicRoutes(app: FastifyInstance) {
     const body = z.object({ name: z.string().trim().min(1).max(30).optional(), sortOrder: z.number().int().optional() }).parse(req.body);
     const cls = await prisma.schoolClass.findFirst({ where: { id: classId, schoolId: school.id } });
     if (!cls) throw notFound("Class");
+    if (body.name && body.name.toLowerCase() !== cls.name.toLowerCase() && (await prisma.schoolClass.findFirst({ where: { schoolId: school.id, name: { equals: body.name, mode: "insensitive" } } })))
+      throw conflict(`Class ${body.name} already exists.`);
     await prisma.$transaction(async (tx) => {
       await tx.schoolClass.update({ where: { id: cls.id }, data: body });
       if (body.name && body.name !== cls.name) {
         await tx.student.updateMany({ where: { schoolId: school.id, className: cls.name }, data: { className: body.name } });
         await tx.staff.updateMany({ where: { schoolId: school.id, className: cls.name }, data: { className: body.name } });
       }
+      if (body.name && body.sortOrder === undefined) await reorderClasses(tx, school.id);
     });
     await audit(req, { action: "class.updated", summary: `${p.name} renamed class ${cls.name}${body.name ? ` to ${body.name}` : ""}`, schoolId: school.id });
     return { ok: true };

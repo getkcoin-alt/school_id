@@ -14,6 +14,7 @@ import {
   CardPreview,
   PDFProofButton,
   DeleteConfirm,
+  DateInput,
 } from "../components.jsx";
 import {
   eligible,
@@ -24,6 +25,7 @@ import {
   STAGES,
   download,
   csvText,
+  toDMY,
 } from "../lib.js";
 import { getFile, putFile, deleteFile } from "../files.js";
 function PDFViewer({ file, onClose, notify }) {
@@ -812,7 +814,8 @@ export function Designs({ ctx }) {
                     </Button>
                   ) : (
                     <Button
-                      variant="secondary"
+                      variant={data.lanyard === d.name ? "soft" : "secondary"}
+                      icon={data.lanyard === d.name ? "check" : null}
                       onClick={() => {
                         update((x) => ({ ...x, lanyard: d.name }));
                         notify(`${d.name} selected as the school lanyard.`);
@@ -820,6 +823,20 @@ export function Designs({ ctx }) {
                     >
                       {data.lanyard === d.name ? "Selected" : "Choose"}
                     </Button>
+                  )}
+                  {ctx.live && (role === "super" || (role === "premium" && d.agentId && d.agentId === data.me?.agentId)) && (
+                    <IconButton
+                      icon="trash"
+                      label={"Remove design " + d.name}
+                      onClick={() => {
+                        if (!window.confirm(`Remove ${d.name} from the collection? Schools using it keep their printed cards.`)) return;
+                        ctx.api
+                          .del(`/designs/${d.id}`)
+                          .then(() => ctx.reload())
+                          .then(() => notify(`${d.name} removed.`))
+                          .catch((err) => notify(err.message, "error"));
+                      }}
+                    />
                   )}
                 </div>
               </div>
@@ -833,10 +850,31 @@ export function Designs({ ctx }) {
           onClose={() => setUpload(false)}
         >
           <form
-            onSubmit={(e) => {
+            onSubmit={async (e) => {
               e.preventDefault();
               if (!file) {
                 notify("Choose a design image first.", "error");
+                return;
+              }
+              if (ctx.live) {
+                // Saved on the server so every school of this agent (or all schools, for
+                // ID Card Studio designs) can pick it from the collection.
+                try {
+                  await ctx.api.upload("/designs", {
+                    name: draft.name.trim(),
+                    kind: draft.kind === "Lanyard" ? "LANYARD" : "ID_CARD",
+                    audience: draft.audience.toUpperCase(),
+                    color: draft.color,
+                    files: [file],
+                  });
+                  await ctx.reload();
+                  setUpload(false);
+                  setFile(null);
+                  setDraft({ ...draft, name: "" });
+                  notify(`${draft.name.trim()} added. ${role === "super" ? "Every school" : "Your schools"} can now choose it.`);
+                } catch (err) {
+                  notify(err.message, "error");
+                }
                 return;
               }
               const r = new FileReader();
@@ -901,7 +939,7 @@ export function Designs({ ctx }) {
               <label className="dropzone">
                 <Icon name="design" size={25} />
                 <strong>{file?.name || "Choose a PNG or JPG artwork"}</strong>
-                <span>Up to 1 MB · front preview only</span>
+                <span>Up to 5 MB · front preview</span>
                 <input
                   type="file"
                   accept="image/png,image/jpeg"
@@ -909,10 +947,10 @@ export function Designs({ ctx }) {
                     const f = e.target.files?.[0];
                     if (!f) return;
                     if (
-                      f.size > 1e6 ||
+                      f.size > 5e6 ||
                       !["image/png", "image/jpeg"].includes(f.type)
                     ) {
-                      notify("Choose a PNG or JPG under 1 MB.", "error");
+                      notify("Choose a PNG or JPG under 5 MB.", "error");
                       return;
                     }
                     setFile(f);
@@ -920,8 +958,11 @@ export function Designs({ ctx }) {
                 />
               </label>
               <Callout>
-                Artwork is available in the gallery. Template field placement
-                and printer output need a connected design editor.
+                {ctx.live
+                  ? role === "super"
+                    ? "Designs added by ID Card Studio are available to every school."
+                    : "Designs you add are available to all your schools."
+                  : "Artwork is available in the gallery. Template field placement and printer output need a connected design editor."}
               </Callout>
             </div>
             <div className="modal-actions">
@@ -963,7 +1004,24 @@ export function PrintOrders({ ctx }) {
     [tracking, setTracking] = useState(""),
     [carrier, setCarrier] = useState(""),
     [fulfilled, setFulfilled] = useState(""),
-    [readySchools, setReadySchools] = useState(null);
+    [readySchools, setReadySchools] = useState(null),
+    [kind, setKind] = useState("Students"), // a batch holds students or staff, never both
+    [rounds, setRounds] = useState(null),
+    [confirmBatch, setConfirmBatch] = useState(false);
+  // Printing rounds used and left, shown before a batch is sent.
+  useEffect(() => {
+    if (!create) return;
+    setConfirmBatch(false);
+    if (live)
+      ctx.api
+        .get(`/batches/rounds?schoolId=${school.id}`)
+        .then(setRounds)
+        .catch(() => setRounds(null));
+    else {
+      const used = (k) => data.batches.filter((b) => b.school === school.id && (k === "student" ? (b.studentIds?.length || !b.staffIds?.length) : b.staffIds?.length) && b.status !== "Cancelled").length;
+      setRounds({ session: ctx.session, student: { allowed: school.studentRounds || 0, used: used("student") }, staff: { allowed: school.staffRounds || 0, used: used("staff") } });
+    }
+  }, [create, school.id]);
   useEffect(() => {
     if (ctx.focus?.name === "createBatch") {
       setCreate(true);
@@ -1034,8 +1092,8 @@ export function PrintOrders({ ctx }) {
       (role !== "school" || b.school === school.id),
   );
   const submit = () => {
-    const chosen = students.filter((s) => selected.includes(s.id));
-    const chosenStaff = staff.filter((s) => staffIds.includes(s.id));
+    const chosen = kind === "Students" ? students.filter((s) => selected.includes(s.id)) : [];
+    const chosenStaff = kind === "Staff" ? staff.filter((s) => staffIds.includes(s.id)) : [];
     if (!chosen.length && !chosenStaff.length) return;
     const batch = {
       id: uid("B"),
@@ -1077,11 +1135,29 @@ export function PrintOrders({ ctx }) {
       ),
     );
     setCreate(false);
+    setConfirmBatch(false);
     setSelected([]);
     setStaffIds([]);
     setName("");
-    notify(`${batch.count} cards submitted as a new print batch.`);
+    notify(`${batch.count} ${kind === "Staff" ? "staff" : "student"} cards sent for printing.`);
   };
+  const picked = kind === "Students" ? selected.length : staffIds.length;
+  // Round summary: which round this batch uses, and a friendly nudge on the last one.
+  const roundInfo = (() => {
+    const r = rounds?.[kind === "Students" ? "student" : "staff"];
+    const who = kind === "Students" ? "student" : "staff";
+    if (!r || !r.allowed) return null;
+    const left = r.allowed - r.used;
+    const sess = rounds.session ? ` for ${rounds.session}` : "";
+    if (left <= 0)
+      return role === "super"
+        ? { tone: "amber", text: `${school.name} has used all ${r.allowed} ${who} printing rounds${sess}. As super admin you can still send this batch; it will count as an extra round.`, after: `This is an extra round beyond the ${r.allowed} included.` }
+        : { tone: "coral", blocked: true, text: `All ${r.allowed} ${who} printing rounds${sess} have been used. Contact ID Card Studio to add another round.` };
+    const after = `This uses round ${r.used + 1} of ${r.allowed}${sess}; ${left - 1 === 0 ? "no rounds will be left after it" : `${left - 1} round${left - 1 === 1 ? "" : "s"} will be left`}.`;
+    if (left === 1)
+      return { tone: "amber", text: `This is the last ${who} printing round${sess}. Include every ${who === "student" ? "student" : "staff member"} you can. Once it is used, more cards need a new round from ID Card Studio.`, after };
+    return { tone: "blue", text: `${r.used} of ${r.allowed} ${who} printing rounds used${sess}. ${after}`, after };
+  })();
   const visibleBatches = batches.filter(
     (b) =>
       (!batchStatus || b.status === batchStatus) &&
@@ -1171,6 +1247,7 @@ export function PrintOrders({ ctx }) {
       )}
       <div className="metric-grid print-metrics">
         {[
+          ["Submitted", "inbox"],
           ["In progress", "print"],
           ["Printed", "package"],
           ["Delivered", "truck"],
@@ -1184,7 +1261,9 @@ export function PrintOrders({ ctx }) {
             <p>
               {s === "Delivered"
                 ? "Finished and handed over"
-                : "School print batches"}
+                : s === "Submitted"
+                  ? "Waiting for the printer"
+                  : "School print batches"}
             </p>
           </div>
         ))}
@@ -1229,6 +1308,7 @@ export function PrintOrders({ ctx }) {
               <tr>
                 <th>BATCH</th>
                 <th>SCHOOL</th>
+                <th>TYPE</th>
                 <th>CARDS</th>
                 <th>FULFILLED BY</th>
                 <th>STATUS</th>
@@ -1245,6 +1325,11 @@ export function PrintOrders({ ctx }) {
                     </small>
                   </td>
                   <td>{data.schools.find((s) => s.id === b.school)?.name}</td>
+                  <td>
+                    <Badge tone={(b.kind || (b.staffIds?.length && !b.studentIds?.length ? "Staff" : "Students")) === "Staff" ? "purple" : "blue"}>
+                      {b.kind || (b.staffIds?.length && !b.studentIds?.length ? "Staff" : "Students")}
+                    </Badge>
+                  </td>
                   <td>{b.count}</td>
                   <td>{b.owner}</td>
                   <td>
@@ -1266,6 +1351,14 @@ export function PrintOrders({ ctx }) {
                         icon="download"
                         label={"Export batch " + b.id}
                         onClick={() => {
+                          if (live) {
+                            if (!canDownload) {
+                              notify("Your plan does not include downloads.", "error");
+                              return;
+                            }
+                            ctx.download(`/batches/${b.id}/download.zip`, `${b.code || b.id}.zip`);
+                            return;
+                          }
                           if (
                             !batchRows(b).length &&
                             !b.staffSnapshot?.length
@@ -1304,12 +1397,12 @@ export function PrintOrders({ ctx }) {
         an approved student returns the record to review. Printed output in this
         preview is a sample card proof.
       </Callout>
-      <OrderForms ctx={ctx} batches={batches} />
+      <OrderForms ctx={ctx} />
       {create && (
         <Modal
           wide
           title="Create a print batch"
-          subtitle={`${school.name} · ${students.length} approved students and ${staff.length} approved staff`}
+          subtitle={`${school.name} · choose students or staff, then review before sending`}
           onClose={() => setCreate(false)}
         >
           <div className="modal-body">
@@ -1341,91 +1434,115 @@ export function PrintOrders({ ctx }) {
                 placeholder="e.g. Class 6 · November collection"
               />
             </Field>
+            <div className="segmented batch-kind" role="tablist" aria-label="Batch type">
+              {["Students", "Staff"].map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  role="tab"
+                  aria-selected={kind === k}
+                  className={kind === k ? "active" : ""}
+                  onClick={() => {
+                    setKind(k);
+                    setSelected([]);
+                    setStaffIds([]);
+                    setConfirmBatch(false);
+                  }}
+                >
+                  {k === "Students" ? `Student cards (${students.length})` : `Staff cards (${staff.length})`}
+                </button>
+              ))}
+            </div>
+            <p className="muted small-note">A batch holds either students or staff. Make a separate batch for each.</p>
+            {roundInfo && (
+              <Callout icon={roundInfo.tone === "coral" ? "alert" : "calendar"} tone={roundInfo.tone}>
+                {roundInfo.text}
+              </Callout>
+            )}
             <div className="print-select-head">
-              <strong>Student cards</strong>
+              <strong>{kind === "Students" ? "Approved students" : "Approved staff"}</strong>
               <Button
                 variant="text"
                 onClick={() =>
-                  setSelected(
-                    selected.length === students.length
-                      ? []
-                      : students.map((s) => s.id),
-                  )
+                  kind === "Students"
+                    ? setSelected(selected.length === students.length ? [] : students.map((s) => s.id))
+                    : setStaffIds(staffIds.length === staff.length ? [] : staff.map((s) => s.id))
                 }
               >
-                {selected.length === students.length ? "Clear" : "Select all"}
+                {(kind === "Students" ? selected.length === students.length && students.length : staffIds.length === staff.length && staff.length) ? "Clear" : "Select all"}
               </Button>
             </div>
-            {students.map((s) => (
-              <label className="print-select-row" key={s.id}>
-                <input
-                  type="checkbox"
-                  checked={selected.includes(s.id)}
-                  onChange={() =>
-                    setSelected(
-                      selected.includes(s.id)
-                        ? selected.filter((id) => id !== s.id)
-                        : [...selected, s.id],
-                    )
-                  }
-                />
-                <Avatar name={s.name} />
-                <span>
-                  <strong>{s.name}</strong>
-                  <small>
-                    {s.admission} · Class {s.classNo} {s.section}
-                  </small>
-                </span>
-                <Badge>Approved</Badge>
-              </label>
-            ))}
-            {staff.length > 0 && (
-              <div className="print-select-head">
-                <strong>Staff cards</strong>
-              </div>
-            )}
-            {staff.map((s) => (
-              <label className="print-select-row" key={s.id}>
-                <input
-                  type="checkbox"
-                  checked={staffIds.includes(s.id)}
-                  onChange={() =>
-                    setStaffIds(
-                      staffIds.includes(s.id)
-                        ? staffIds.filter((id) => id !== s.id)
-                        : [...staffIds, s.id],
-                    )
-                  }
-                />
-                <Avatar name={s.name} />
-                <span>
-                  <strong>{s.name}</strong>
-                  <small>{s.role}</small>
-                </span>
-                <Badge>Approved</Badge>
-              </label>
-            ))}
-            {!students.length && !staff.length && (
+            {kind === "Students" &&
+              students.map((s) => (
+                <label className="print-select-row" key={s.id}>
+                  <input
+                    type="checkbox"
+                    checked={selected.includes(s.id)}
+                    onChange={() => setSelected(selected.includes(s.id) ? selected.filter((id) => id !== s.id) : [...selected, s.id])}
+                  />
+                  <Avatar name={s.name} />
+                  <span>
+                    <strong>{s.name}</strong>
+                    <small>
+                      {s.admission ? `${s.admission} · ` : ""}Class {s.classNo} {s.section}
+                    </small>
+                  </span>
+                  <Badge>Approved</Badge>
+                </label>
+              ))}
+            {kind === "Staff" &&
+              staff.map((s) => (
+                <label className="print-select-row" key={s.id}>
+                  <input
+                    type="checkbox"
+                    checked={staffIds.includes(s.id)}
+                    onChange={() => setStaffIds(staffIds.includes(s.id) ? staffIds.filter((id) => id !== s.id) : [...staffIds, s.id])}
+                  />
+                  <Avatar name={s.name} />
+                  <span>
+                    <strong>{s.name}</strong>
+                    <small>{s.role}</small>
+                  </span>
+                  <Badge>Approved</Badge>
+                </label>
+              ))}
+            {(kind === "Students" ? !students.length : !staff.length) && (
               <Empty
-                title="No approved cards available"
-                text="Approve students in Review Submissions, or approve staff from the staff directory."
+                title={`No approved ${kind === "Students" ? "student" : "staff"} cards`}
+                text={kind === "Students" ? "Approve students in Review submissions first." : "Approve staff from the staff directory first."}
               />
+            )}
+            {confirmBatch && (
+              <div className="batch-confirm">
+                <strong>Before you send {picked} {kind === "Students" ? "student" : "staff"} card{picked === 1 ? "" : "s"} to print</strong>
+                <ul>
+                  <li>
+                    The cards are locked as <b>Submitted for print</b>. Changing a student or staff record afterwards will not change the printed card.
+                  </li>
+                  {roundInfo?.after && <li>{roundInfo.after}</li>}
+                  <li>The printer is notified and you can follow the batch on this page until it is delivered.</li>
+                  <li>Until printing starts you can still delete the batch; the cards then go back to Approved.</li>
+                </ul>
+              </div>
             )}
           </div>
           <div className="modal-actions">
-            <span className="muted">
-              {selected.length + staffIds.length} cards selected
-            </span>
-            <Button variant="secondary" onClick={() => setCreate(false)}>
-              Cancel
-            </Button>
+            <span className="muted">{picked} cards selected</span>
             <Button
-              disabled={!selected.length && !staffIds.length}
-              icon="print"
-              onClick={submit}
+              variant="secondary"
+              onClick={() => (confirmBatch ? setConfirmBatch(false) : setCreate(false))}
             >
-              Submit for printing
+              {confirmBatch ? "Back" : "Cancel"}
             </Button>
+            {confirmBatch ? (
+              <Button icon="print" onClick={submit}>
+                Confirm and send to print
+              </Button>
+            ) : (
+              <Button disabled={!picked || roundInfo?.blocked} icon="print" onClick={() => setConfirmBatch(true)}>
+                Review and send
+              </Button>
+            )}
           </div>
         </Modal>
       )}
@@ -1455,7 +1572,7 @@ export function PrintOrders({ ctx }) {
                   className={STAGES.indexOf(detail.status) >= i ? "done" : ""}
                 >
                   <span>
-                    <Icon name={["print", "package", "truck"][i]} />
+                    <Icon name={["inbox", "print", "package", "truck"][i]} />
                   </span>
                   <strong>{s}</strong>
                 </div>
@@ -1532,7 +1649,7 @@ export function PrintOrders({ ctx }) {
                     >
                       {STAGES.filter(
                         (s) =>
-                          STAGES.indexOf(s) >= STAGES.indexOf(detail.status),
+                          STAGES.indexOf(s) >= STAGES.indexOf(detail.status) - 1,
                       ).map((s) => (
                         <option key={s}>{s}</option>
                       ))}
@@ -1574,7 +1691,7 @@ export function PrintOrders({ ctx }) {
                       ),
                     );
                     setDetail(updated);
-                    notify("Production status updated across the preview.");
+                    notify(live ? `${detail.code || detail.id} is now ${nextStatus.toLowerCase()}. The school has been notified.` : "Production status updated across the preview.");
                   }}
                 >
                   Save production update
@@ -1596,87 +1713,316 @@ export function PrintOrders({ ctx }) {
 }
 
 /** Change sheet #6: every panel can upload a school's order form. */
-function OrderForms({ ctx, batches }) {
-  const { live, school, data, notify, update, role } = ctx;
-  const [file, setFile] = useState(null),
-    [batchId, setBatchId] = useState(""),
-    [note, setNote] = useState(""),
-    [busy, setBusy] = useState(false);
-  const forms = (live ? data.orderForms : data.orderForms || []).filter(
-    (f) => role !== "school" || (f.schoolId || f.school) === school.id,
+// The CtC Id Solutions order form, as sections of fields. "choice" fields are radio buttons.
+const ORDER_SECTIONS = [
+  {
+    title: "School",
+    fields: [
+      ["srNo", "Sr. no."],
+      ["date", "Date", "date"],
+      ["schoolName", "School name", "text", true],
+      ["address", "Address", "wide"],
+      ["contactNo", "Contact no.", "tel"],
+      ["email", "Email ID", "email"],
+      ["emailPrint", "Print email on card", ["Yes", "No"]],
+      ["website", "Website"],
+      ["websitePrint", "Print website on card", ["Yes", "No"]],
+    ],
+  },
+  {
+    title: "Card",
+    fields: [
+      ["design", "Design", ["Same as last year", "Changes in old design", "New design"]],
+      ["schoolLogo", "School logo", ["Same as last year", "New logo attached"]],
+      ["cardType", "Card type", ["PVC card", "Laminated card", "Card with holder"]],
+      ["issuingAuthority", "Issuing authority on card", ["Principal", "Director", "Manager", "None"]],
+      ["signature", "Signature", ["Printed on card", "Not required"]],
+      ["attachment", "Attachment", ["Excel sheet", "Photos", "Excel & photos", "Old card sample"]],
+    ],
+  },
+  {
+    title: "Lanyard (dori)",
+    fields: [
+      ["doriType", "Dori type", ["Plain", "Printed", "Not required"]],
+      ["doriColour", "Dori colour"],
+      ["printOnDories", "Print on dories"],
+      ["doriCount", "No. of dories", "number"],
+    ],
+  },
+  {
+    title: "Card holder",
+    fields: [
+      ["holderOrientation", "Holder", ["Vertical", "Horizontal", "Not required"]],
+      ["holderSticky", "Sticky", ["Yes", "No"]],
+      ["holderSides", "Sides", ["Single side", "Both sides"]],
+      ["holderSize", "Size"],
+    ],
+  },
+  {
+    title: "Rates & contacts",
+    fields: [
+      ["rate", "Rate per card (₹)", "number"],
+      ["advance", "Advance (₹)", "number"],
+      ["extraDoriRate", "Extra dori rate (₹)", "number"],
+      ["staffName", "Our staff name"],
+      ["staffContact", "Our staff contact", "tel"],
+      ["authName", "School authority name"],
+      ["authDesignation", "Designation"],
+      ["authContact", "Authority contact", "tel"],
+      ["remarks", "Remarks", "wide"],
+    ],
+  },
+];
+
+const formValue = (v) => (v === true ? "Yes" : v === false ? "No" : v == null || v === "" ? "—" : String(v));
+
+function printOrderForm(f) {
+  const d = f.details || {};
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  const body = ORDER_SECTIONS.map(
+    (s) =>
+      `<h2>${esc(s.title)}</h2><table>${s.fields
+        .map(([k, l, t]) => `<tr><th>${esc(l)}</th><td>${esc(t === "date" && d[k] ? toDMY(d[k]) : formValue(d[k]))}</td></tr>`)
+        .join("")}</table>`,
+  ).join("");
+  const w = window.open("", "_blank");
+  if (!w) return;
+  w.document.write(
+    `<!doctype html><html><head><meta charset="utf-8"><title>Order form · ${esc(f.schoolName)}</title><style>body{font:14px/1.5 system-ui,sans-serif;margin:32px;color:#111}h1{font-size:20px;margin:0 0 4px}h2{font-size:15px;margin:20px 0 6px;border-bottom:1px solid #999}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:5px 8px;border-bottom:1px solid #ddd;vertical-align:top}th{width:40%;font-weight:600}p{color:#555;margin:0}</style></head><body><h1>CtC Id Solutions · ID card order form</h1><p>${esc(f.schoolName)}${f.note ? " · " + esc(f.note) : ""}</p>${body}<script>window.onload=()=>window.print()</script></body></html>`,
   );
-  const upload = async () => {
-    if (!file) return;
+  w.document.close();
+}
+
+function OrderFormEditor({ ctx, form, schools, onClose }) {
+  const { live, notify, update } = ctx;
+  const first = form?.schoolId || ctx.school.id;
+  const schoolOf = (id) => schools.find((s) => s.id === id);
+  const prefill = (id) => {
+    const s = schoolOf(id) || {};
+    return {
+      date: new Date().toISOString().slice(0, 10),
+      schoolName: s.name || "",
+      address: [s.address, s.city, s.state, s.pin].filter(Boolean).join(", "),
+      contactNo: s.phone || "",
+      email: s.email || "",
+      authName: s.principal || "",
+      authDesignation: s.principal ? "Principal" : "",
+    };
+  };
+  const [schoolId, setSchoolId] = useState(first);
+  const [d, setD] = useState(form?.details || prefill(first));
+  const [note, setNote] = useState(form?.note || "");
+  const [file, setFile] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const set = (k, v) => setD((x) => ({ ...x, [k]: v }));
+  const save = async (e) => {
+    e.preventDefault();
+    if (file && file.size > 10 * 1024 * 1024) return notify("The scan must be under 10 MB.", "error");
+    const details = Object.fromEntries(Object.entries(d).filter(([, v]) => v !== "" && v != null).map(([k, v]) => [k, String(v)]));
     setBusy(true);
     try {
       if (live) {
-        await ctx.api.upload("/media/order-forms", { schoolId: school.id, batchId: batchId || undefined, note: note || undefined, file });
+        if (form) await ctx.api.patch(`/media/order-forms/${form.id}`, { details, note });
+        else await ctx.api.upload("/media/order-forms", { schoolId, details: JSON.stringify(details), ...(note ? { note } : {}), ...(file ? { file } : {}) });
         await ctx.reload();
       } else
-        update((d) => ({
-          ...d,
-          orderForms: [
-            { id: Date.now().toString(36), school: school.id, schoolName: school.name, fileName: file.name, note, batchCode: batchId, createdAt: new Date().toISOString() },
-            ...(d.orderForms || []),
-          ],
+        update((data) => ({
+          ...data,
+          orderForms: form
+            ? (data.orderForms || []).map((f) => (f.id === form.id ? { ...f, details, note } : f))
+            : [{ id: uid("OF"), school: schoolId, schoolId, schoolName: schoolOf(schoolId)?.name, fileName: file?.name || null, details, note, createdAt: new Date().toISOString() }, ...(data.orderForms || [])],
         }));
-      notify("Order form uploaded.");
-      setFile(null);
-      setNote("");
-      setBatchId("");
-    } catch (e) {
-      notify(e.message, "error");
+      notify(form ? "Order form updated." : `Order form saved. ${schoolOf(schoolId)?.name || "The school"} can now see it.`);
+      onClose();
+    } catch (err) {
+      notify(err.message, "error");
     } finally {
       setBusy(false);
     }
   };
   return (
-    <Panel title="Order forms" subtitle={`Signed order forms for ${school.name}. PDF, image, Excel or Word.`}>
-      <div className="padded order-form-upload">
-        <label className="btn secondary upload-label">
-          <Icon name="upload" size={15} />
-          <span>{file ? file.name : "Choose file"}</span>
-          <input type="file" accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls,.doc,.docx" onChange={(e) => setFile(e.target.files?.[0] || null)} />
-        </label>
-        <select aria-label="Link to a batch" value={batchId} onChange={(e) => setBatchId(e.target.value)}>
-          <option value="">Not linked to a batch</option>
-          {batches
-            .filter((b) => b.school === school.id)
-            .map((b) => (
-              <option key={b.id} value={b.code || b.id}>
-                {b.name}
-              </option>
-            ))}
-        </select>
-        <input placeholder="Note (optional)" value={note} onChange={(e) => setNote(e.target.value)} maxLength="500" />
-        <Button disabled={!file || busy} onClick={upload}>
-          {busy ? "Uploading…" : "Upload order form"}
-        </Button>
+    <Modal wide title={form ? "Edit order form" : "New order form"} subtitle="CtC Id Solutions ID card order form. The school sees it read-only." onClose={onClose}>
+      <form onSubmit={save} className="order-form">
+        <div className="form-grid">
+          <Field label="School" required>
+            <select
+              required
+              disabled={Boolean(form)}
+              value={schoolId}
+              onChange={(e) => {
+                setSchoolId(e.target.value);
+                setD({ ...d, ...prefill(e.target.value) });
+              }}
+            >
+              {schools.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          {!form && (
+            <Field label="Signed scan (optional)" hint="PDF or photo of the signed paper form">
+              <input type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+            </Field>
+          )}
+        </div>
+        {ORDER_SECTIONS.map((sec) => (
+          <fieldset key={sec.title} className="order-section">
+            <legend>{sec.title}</legend>
+            <div className="form-grid">
+              {sec.fields.map(([k, l, t, req]) =>
+                Array.isArray(t) ? (
+                  <div key={k} className="field choice-field">
+                    <span className="field-label">{l}</span>
+                    <div className="choice-row" role="radiogroup" aria-label={l}>
+                      {t.map((o) => (
+                        <label key={o} className={`choice ${d[k] === o ? "on" : ""}`}>
+                          <input type="radio" name={k} checked={d[k] === o} onChange={() => set(k, o)} />
+                          {o}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                ) : t === "date" ? (
+                  <Field key={k} label={l}>
+                    <DateInput value={d[k] || ""} onChange={(v) => set(k, v)} />
+                  </Field>
+                ) : (
+                  <Field key={k} label={l} required={req} className={t === "wide" ? "span-2" : undefined}>
+                    {t === "wide" ? (
+                      <textarea rows="2" maxLength="500" value={d[k] || ""} onChange={(e) => set(k, e.target.value)} />
+                    ) : (
+                      <input required={req} type={t === "number" ? "number" : t === "email" ? "email" : t === "tel" ? "tel" : "text"} min={t === "number" ? "0" : undefined} maxLength="200" value={d[k] ?? ""} onChange={(e) => set(k, e.target.value)} />
+                    )}
+                  </Field>
+                ),
+              )}
+            </div>
+          </fieldset>
+        ))}
+        <Field label="Internal note (optional)">
+          <input maxLength="500" value={note} onChange={(e) => setNote(e.target.value)} />
+        </Field>
+        <div className="modal-actions">
+          <Button variant="secondary" type="button" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" disabled={busy}>
+            {busy ? "Saving…" : form ? "Save changes" : "Save order form"}
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function OrderFormView({ form, onClose }) {
+  const d = form.details || {};
+  return (
+    <Modal wide title={`Order form · ${form.schoolName}`} subtitle={`Filled on ${fmtDate(form.createdAt)}${form.note ? " · " + form.note : ""}`} onClose={onClose}>
+      {!form.details && <p className="muted">This order form is a scanned file only.</p>}
+      {form.details &&
+        ORDER_SECTIONS.map((sec) => (
+          <div key={sec.title} className="order-view">
+            <h3>{sec.title}</h3>
+            <dl>
+              {sec.fields.map(([k, l, t]) => (
+                <React.Fragment key={k}>
+                  <dt>{l}</dt>
+                  <dd>{t === "date" && d[k] ? toDMY(d[k]) : formValue(d[k])}</dd>
+                </React.Fragment>
+              ))}
+            </dl>
+          </div>
+        ))}
+      <div className="modal-actions">
+        {form.url && (
+          <a className="btn secondary" href={form.url} target="_blank" rel="noreferrer">
+            <Icon name="download" size={15} /> Signed scan
+          </a>
+        )}
+        {form.details && (
+          <Button variant="secondary" onClick={() => printOrderForm(form)}>
+            <Icon name="print" size={15} /> Print
+          </Button>
+        )}
+        <Button onClick={onClose}>Close</Button>
       </div>
-      {forms.length > 0 && (
+    </Modal>
+  );
+}
+
+function OrderForms({ ctx }) {
+  const { live, school, data, notify, update, role } = ctx;
+  const canManage = role !== "school"; // super admin and agents fill in, edit and delete order forms
+  const schools = ctx.availableSchools || data.schools;
+  const [edit, setEdit] = useState(null); // null | "new" | form
+  const [view, setView] = useState(null);
+  const forms = (data.orderForms || []).filter((f) => (role === "school" ? (f.schoolId || f.school) === school.id : true));
+  const remove = async (f) => {
+    if (!window.confirm(`Delete the order form for ${f.schoolName}? This cannot be undone.`)) return;
+    try {
+      if (live) {
+        await ctx.api.del(`/media/order-forms/${f.id}`);
+        await ctx.reload();
+      } else update((d) => ({ ...d, orderForms: (d.orderForms || []).filter((x) => x.id !== f.id) }));
+      notify("Order form deleted.");
+    } catch (e) {
+      notify(e.message, "error");
+    }
+  };
+  return (
+    <Panel
+      title="Order forms"
+      subtitle={canManage ? "Fill in the CtC order form for a school. The school sees it but cannot change or delete it." : `Order forms filled in for ${school.name} by your agent.`}
+      action={
+        canManage && (
+          <Button onClick={() => setEdit("new")}>
+            <Icon name="plus" size={15} /> New order form
+          </Button>
+        )
+      }
+    >
+      {forms.length > 0 ? (
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>FILE</th>
                 <th>SCHOOL</th>
-                <th>BATCH</th>
-                <th>UPLOADED</th>
+                <th>CARD</th>
+                <th>DORI</th>
+                <th>DATE</th>
+                <th aria-label="Actions" />
               </tr>
             </thead>
             <tbody>
               {forms.map((f) => (
                 <tr key={f.id}>
-                  <td>{f.url ? <a href={f.url} target="_blank" rel="noreferrer">{f.fileName}</a> : f.fileName}{f.note && <small className="block muted">{f.note}</small>}</td>
-                  <td>{f.schoolName}</td>
-                  <td>{f.batchCode || "—"}</td>
-                  <td>{fmtDate(f.createdAt)}</td>
+                  <td>
+                    <button type="button" className="link-btn" onClick={() => setView(f)}>
+                      {f.schoolName}
+                    </button>
+                    {f.note && <small className="block muted">{f.note}</small>}
+                  </td>
+                  <td>{f.details?.cardType || (f.fileName ? "Scan only" : "—")}</td>
+                  <td>{f.details?.doriType ? `${f.details.doriType}${f.details.doriCount ? " · " + f.details.doriCount : ""}` : "—"}</td>
+                  <td>{f.details?.date ? toDMY(f.details.date) : fmtDate(f.createdAt)}</td>
+                  <td className="row-actions">
+                    <IconButton icon="eye" label="View order form" onClick={() => setView(f)} />
+                    {canManage && f.details && <IconButton icon="edit" label="Edit order form" onClick={() => setEdit(f)} />}
+                    {canManage && <IconButton icon="trash" label="Delete order form" onClick={() => remove(f)} />}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+      ) : (
+        <Empty title="No order forms yet" text={canManage ? "Use New order form to fill in the CtC order form for a school." : "Your agent will add the order form here."} />
       )}
+      {edit && <OrderFormEditor ctx={ctx} schools={schools} form={edit === "new" ? null : edit} onClose={() => setEdit(null)} />}
+      {view && <OrderFormView form={view} onClose={() => setView(null)} />}
     </Panel>
   );
 }

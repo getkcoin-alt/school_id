@@ -36,3 +36,23 @@ export function nextSession(names: string[]) {
   const y = Math.max(...years) + 1;
   return `${y}–${String((y + 1) % 100).padStart(2, "0")}`;
 }
+
+const ROMAN: Record<string, number> = { I: 1, II: 2, III: 3, IV: 4, V: 5, VI: 6, VII: 7, VIII: 8, IX: 9, X: 10, XI: 11, XII: 12 };
+const EARLY: [RegExp, number][] = [
+  [/^(play\s*group|pg|pre[\s-]*nursery)$/i, -5],
+  [/^(nursery|nur)$/i, -4],
+  [/^(lkg|l\.?k\.?g\.?|kg\s*1|jr\.?\s*kg)$/i, -3],
+  [/^(kg|k\.?g\.?)$/i, -2.5],
+  [/^(ukg|u\.?k\.?g\.?|kg\s*2|sr\.?\s*kg)$/i, -2],
+  [/^(prep|preparatory)$/i, -1],
+];
+/** Natural school order of a class name: Nursery, LKG, UKG, then I/1 … XII/12. */
+export function classRank(name: string) {
+  const n = String(name).trim().replace(/^(class|std\.?|grade)\s*/i, "");
+  for (const [re, rank] of EARLY) if (re.test(n)) return rank;
+  const roman = ROMAN[n.toUpperCase()];
+  if (roman) return roman;
+  const num = Number.parseInt(n, 10);
+  if (Number.isFinite(num)) return num;
+  return 100;
+}

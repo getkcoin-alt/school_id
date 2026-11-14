@@ -127,8 +127,8 @@ export async function schoolRoutes(app: FastifyInstance) {
         ...contact,
         ...adminFields,
         status: adminFields.status.default("ACTIVE"),
-        studentRounds: adminFields.studentRounds.default(1),
-        staffRounds: adminFields.staffRounds.default(1),
+        studentRounds: adminFields.studentRounds.default(3),
+        staffRounds: adminFields.staffRounds.default(3),
         studentPermit: adminFields.studentPermit.default(true),
         staffPermit: adminFields.staffPermit.default(true),
         admin: z.object({ name: z.string().trim().min(2, "Enter the school admin's name."), email: z.string().email("Enter a valid admin email."), phone: z.string().optional() }).optional(),
@@ -180,7 +180,7 @@ export async function schoolRoutes(app: FastifyInstance) {
       ? z.object({ ...contact, ...adminFields, ...designFields }).partial()
       : isSchool(p)
         ? z.object({ ...contact, ...designFields }).partial()
-        : z.object({ ...contact, ...designFields }).partial(); // agents keep contacts and designs current
+        : z.object({ ...contact, ...designFields, status: adminFields.status }).partial(); // agents keep contacts, designs and active status current
     const body = shape.parse(req.body) as Record<string, unknown>;
     if (body.email === "") body.email = null;
     if (body.agentId && !(await prisma.agent.findFirst({ where: { id: String(body.agentId), deletedAt: null } }))) throw badRequest("Choose a valid agent.");
@@ -188,6 +188,11 @@ export async function schoolRoutes(app: FastifyInstance) {
       if (body[key] && !(await prisma.design.findFirst({ where: { id: String(body[key]), deletedAt: null } }))) throw badRequest("Choose a valid design.");
     }
     const updated = await prisma.school.update({ where: { id: school.id }, data: body, include: { agent: true } });
+    if (body.status === "INACTIVE" && school.status !== "INACTIVE") {
+      // Sign the school's people out straight away.
+      await prisma.user.updateMany({ where: { schoolId: school.id }, data: { tokenVersion: { increment: 1 } } });
+      await prisma.refreshToken.updateMany({ where: { user: { schoolId: school.id }, revokedAt: null, impersonatorId: null }, data: { revokedAt: new Date() } });
+    }
     await audit(req, { action: "school.updated", summary: `${p.name} updated ${school.name}`, entityType: "school", entityId: school.id, schoolId: school.id, meta: { fields: Object.keys(body) } });
     return serializeSchool(updated);
   });
@@ -259,7 +264,8 @@ export async function schoolRoutes(app: FastifyInstance) {
       enabled: z.boolean(),
       required: z.boolean(),
       custom: z.boolean().default(false),
-      type: z.string().default("text"),
+      type: z.enum(["text", "select", "date", "tel", "email"]).or(z.string()).default("text"),
+      options: z.array(z.string().trim().min(1).max(60)).max(100).optional(),
     });
     const body = z.object({ audience: z.enum(["STUDENT", "STAFF"]), fields: z.array(item).max(60) }).parse(req.body);
     const current = await schoolFields(school.id, body.audience);
@@ -280,6 +286,7 @@ export async function schoolRoutes(app: FastifyInstance) {
             required: locked ? true : f.enabled && f.required,
             custom: !builtInKeys.has(key),
             sortOrder: i,
+            options: !builtInKeys.has(key) && f.type === "select" ? [...new Set(f.options ?? [])] : [],
           };
         }),
         skipDuplicates: true,

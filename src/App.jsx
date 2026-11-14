@@ -846,7 +846,7 @@ function App({ live = false, initialData = null }) {
               )}
               {content}
               <footer className="main-footer">
-                <span>© 2026 ID Studio</span>
+                <span>Software is powered by CTC. All rights reserved.</span>
                 <span>A little less admin. A lot more school.</span>
                 <button onClick={() => go("guide")}>
                   Need a hand? <Icon name="upRight" size={13} />

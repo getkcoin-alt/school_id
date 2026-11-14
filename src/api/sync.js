@@ -75,14 +75,16 @@ export async function loadWorkspace(schoolId, session) {
     uploads: pdfs.map(fromPdf),
     designs: ws.designs.map(fromDesign),
     design: designName(sc?.studentDesignId) || ws.designs[0]?.name || "Classic",
+    lanyard: designName(sc?.lanyardDesignId) || "",
     schoolDesigns: Object.fromEntries(ws.schools.filter((s) => s.studentDesignId).map((s) => [s.id, designName(s.studentDesignId)])),
     enabledFields: studentFields.filter((f) => f.enabled && !f.custom).map((f) => uiKey(f.key)),
     fieldScope: sid ? { [sid]: studentFields.filter((f) => f.enabled && !f.custom).map((f) => uiKey(f.key)) } : {},
     fieldRequired: sid ? { [sid]: studentFields.filter((f) => f.required && !f.custom).map((f) => uiKey(f.key)) } : {},
     staffFieldScope: sid ? { [sid]: staffFields.filter((f) => f.enabled && !f.custom).map((f) => uiKey(f.key)) } : {},
+    staffFieldRequired: sid ? { [sid]: staffFields.filter((f) => f.required && !f.custom).map((f) => uiKey(f.key)) } : {},
     customFields: [
-      ...studentFields.filter((f) => f.custom).map((f) => ({ id: f.key, school: sid, name: f.label, audience: "student", enabled: f.enabled, required: f.required })),
-      ...staffFields.filter((f) => f.custom).map((f) => ({ id: f.key, school: sid, name: f.label, audience: "staff", enabled: f.enabled, required: f.required })),
+      ...studentFields.filter((f) => f.custom).map((f) => ({ id: f.key, school: sid, name: f.label, audience: "student", enabled: f.enabled, required: f.required, type: f.type || "text", options: f.options || [] })),
+      ...staffFields.filter((f) => f.custom).map((f) => ({ id: f.key, school: sid, name: f.label, audience: "staff", enabled: f.enabled, required: f.required, type: f.type || "text", options: f.options || [] })),
     ],
     notifications: notifications.items.map((n) => ({ id: n.id, title: n.title, text: n.body || "", read: Boolean(n.readAt), link: n.link })),
     audit: activity.items.map(fromActivity),
@@ -107,7 +109,12 @@ export async function pushChanges(prev, next, schoolId) {
 
   // Schools and agents (super admin; agents edit their own profile).
   diff(prev.schools, next.schools, {
-    add: (s) => run(() => api.post("/schools", { ...toSchool(s), createDefaultClasses: true, ...(s.adminEmail ? { admin: { name: s.adminName || s.principal || s.name, email: s.adminEmail } } : {}) })),
+    add: (s) =>
+      run(async () => {
+        const created = await api.post("/schools", { ...toSchool(s), createDefaultClasses: !s.copyFrom, ...(s.adminEmail ? { admin: { name: s.adminName || s.principal || s.name, email: s.adminEmail } } : {}) });
+        // A copied school also takes the source's ID card fields, classes, sections and designs.
+        if (s.copyFrom) await api.post(`/schools/${created.id}/copy-setup`, { fromSchoolId: s.copyFrom });
+      }),
     update: (s) => run(() => api.patch(`/schools/${s.id}`, toSchool(s))),
     remove: (s) => run(() => api.del(`/schools/${s.id}`)),
   });
@@ -131,21 +138,29 @@ export async function pushChanges(prev, next, schoolId) {
           audience: "STUDENT",
           fields: [
             ...FIELDS.map(([k, label]) => ({ key: apiKey(k), label, enabled: LOCKED_FIELDS.includes(k) || enabled.includes(k), required: LOCKED_FIELDS.includes(k) || (enabled.includes(k) && required.includes(k)) })),
-            ...next.customFields.filter((f) => f.school === schoolId && f.audience !== "staff").map((f) => ({ ...(f.id.startsWith("x_") ? { key: f.id } : {}), label: f.name, enabled: f.enabled ?? true, required: Boolean(f.required) })),
+            ...next.customFields.filter((f) => f.school === schoolId && f.audience !== "staff").map((f) => ({ ...(f.id.startsWith("x_") ? { key: f.id } : {}), label: f.name, enabled: f.enabled ?? true, required: Boolean(f.required), type: f.type || "text", options: f.type === "select" ? f.options || [] : undefined })),
           ],
         }),
       );
     }
-    const staffChanged = changed(prev.staffFieldScope?.[schoolId], next.staffFieldScope?.[schoolId]) || changed(prev.customFields.filter((f) => f.audience === "staff"), next.customFields.filter((f) => f.audience === "staff"));
+    const staffChanged =
+      changed(prev.staffFieldScope?.[schoolId], next.staffFieldScope?.[schoolId]) ||
+      changed(prev.staffFieldRequired?.[schoolId], next.staffFieldRequired?.[schoolId]) ||
+      changed(prev.customFields.filter((f) => f.audience === "staff"), next.customFields.filter((f) => f.audience === "staff"));
     if (staffChanged) {
       const enabled = next.staffFieldScope?.[schoolId] || STAFF_FIELDS.map((f) => f[0]);
+      const required = next.staffFieldRequired?.[schoolId] || ["name", "role"];
       const known = ["name", "role", "phone", "email", "address", "gender", "dob", "classNo", "section"];
+      const locked = ["name", "role"];
       run(() =>
         api.put(`/schools/${schoolId}/fields`, {
           audience: "STAFF",
           fields: [
-            ...STAFF_FIELDS.filter(([k]) => known.includes(k)).map(([k, label, , req]) => ({ key: apiKey(k), label, enabled: req || enabled.includes(k), required: req })),
-            ...next.customFields.filter((f) => f.school === schoolId && f.audience === "staff").map((f) => ({ ...(f.id.startsWith("x_") ? { key: f.id } : {}), label: f.name, enabled: true, required: false })),
+            ...STAFF_FIELDS.filter(([k]) => known.includes(k)).map(([k, label]) => {
+              const on = locked.includes(k) || enabled.includes(k);
+              return { key: apiKey(k), label, enabled: on, required: locked.includes(k) || (on && required.includes(k)) };
+            }),
+            ...next.customFields.filter((f) => f.school === schoolId && f.audience === "staff").map((f) => ({ ...(f.id.startsWith("x_") ? { key: f.id } : {}), label: f.name, enabled: f.enabled ?? true, required: Boolean(f.required), type: f.type || "text", options: f.type === "select" ? f.options || [] : undefined })),
           ],
         }),
       );
@@ -186,6 +201,10 @@ export async function pushChanges(prev, next, schoolId) {
     if (design !== (prev.schoolDesigns?.[schoolId] || prev.design)) {
       const d = next.designs.find((x) => x.name === design);
       if (d) run(() => api.patch(`/schools/${schoolId}`, { studentDesignId: d.id }));
+    }
+    if (next.lanyard && next.lanyard !== prev.lanyard) {
+      const d = next.designs.find((x) => x.name === next.lanyard && x.kind === "Lanyard");
+      if (d) run(() => api.patch(`/schools/${schoolId}`, { lanyardDesignId: d.id }));
     }
   }
 

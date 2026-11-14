@@ -74,7 +74,7 @@ export async function buildApp() {
     if (!header?.startsWith("Bearer ")) return;
     try {
       const claims = await verifyAccess(header.slice(7));
-      const user = await prisma.user.findUnique({ where: { id: claims.sub }, include: { agent: true } });
+      const user = await prisma.user.findUnique({ where: { id: claims.sub }, include: { agent: true, school: true } });
       if (!user || user.tokenVersion !== claims.tv) return;
       if (user.status !== "ACTIVE" && !(claims.imp && user.status === "INVITED")) return;
       if (claims.imp) {
@@ -82,7 +82,9 @@ export async function buildApp() {
         const live = await prisma.refreshToken.findFirst({ where: { familyId: claims.fid, revokedAt: null, expiresAt: { gt: new Date() } }, select: { id: true } });
         if (!live) return;
       }
-      if (user.agent && (user.agent.status !== "ACTIVE" || user.agent.deletedAt)) return;
+      // Inactive schools and agents are signed out; a super admin may still open them.
+      if (!claims.imp && user.agent && (user.agent.status !== "ACTIVE" || user.agent.deletedAt)) return;
+      if (!claims.imp && user.school && (user.school.status !== "ACTIVE" || user.school.deletedAt)) return;
       req.principal = {
         userId: user.id,
         name: user.name,

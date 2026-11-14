@@ -121,7 +121,10 @@ export async function agentRoutes(app: FastifyInstance) {
     }
     if ((body.tier ?? existing.tier) === "REGULAR") data.printBySelf = false;
     const agent = await prisma.agent.update({ where: { id }, data });
-    if (body.status === "INACTIVE") await prisma.user.updateMany({ where: { agentId: id }, data: { tokenVersion: { increment: 1 } } });
+    if (body.status === "INACTIVE") {
+      await prisma.user.updateMany({ where: { agentId: id }, data: { tokenVersion: { increment: 1 } } });
+      await prisma.refreshToken.updateMany({ where: { user: { agentId: id }, revokedAt: null, impersonatorId: null }, data: { revokedAt: new Date() } });
+    }
     await audit(req, { action: "agent.updated", summary: `${p.name} updated agent ${agent.name}`, entityType: "agent", entityId: id, agentId: id, meta: { fields: Object.keys(body) } });
     return serializeAgent(agent);
   });

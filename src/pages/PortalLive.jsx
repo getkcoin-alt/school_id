@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Button, Callout, Field, Icon, Steps } from "../components.jsx";
+import { Button, Callout, DateInput, Field, Icon, Steps } from "../components.jsx";
 import { request } from "../api/client.js";
 
 // Student link (Flow 2) against the live API. The invite token comes from the
@@ -147,7 +147,7 @@ export default function PortalLive({ invite }) {
   const value = (f) => (f.custom ? draft.extra?.[f.key] : draft[f.key]) ?? "";
   const set = (f, v) => setDraft((d) => (f.custom ? { ...d, extra: { ...d.extra, [f.key]: v } } : { ...d, [f.key]: v }));
   const options = (f) =>
-    f.type === "fatherPrefix" ? form.prefixes.father : f.type === "motherPrefix" ? form.prefixes.mother : f.type === "class" ? form.classes.map((c) => c.name) : f.type === "section" ? form.classes.find((c) => c.name === draft.className)?.sections || [] : f.type === "gender" ? ["Male", "Female", "Other"] : f.type === "blood" ? ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"] : null;
+    f.type === "fatherPrefix" ? form.prefixes.father : f.type === "motherPrefix" ? form.prefixes.mother : f.type === "class" ? form.classes.map((c) => c.name) : f.type === "section" ? form.classes.find((c) => c.name === draft.className)?.sections || [] : f.type === "gender" ? ["Male", "Female", "Other"] : f.type === "blood" ? ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"] : f.type === "select" ? f.options || [] : null;
 
   return (
     <div className="portal-live">
@@ -168,7 +168,17 @@ export default function PortalLive({ invite }) {
                     {options(f).map((o) => <option key={o}>{o}</option>)}
                   </select>
                 ) : (
-                  <input type={f.type === "date" ? "date" : f.type === "email" ? "email" : f.type === "tel" ? "tel" : "text"} value={value(f)} disabled={!editable || f.readOnly} onChange={(e) => set(f, e.target.value)} />
+                  f.type === "date" ? (
+                    <DateInput value={value(f)} disabled={!editable || f.readOnly} max={f.key === "dob" ? new Date().toISOString().slice(0, 10) : undefined} onChange={(v) => set(f, v)} />
+                  ) : (
+                    <input
+                      type={f.type === "email" ? "email" : f.type === "tel" ? "tel" : "text"}
+                      className={["name", "fatherName", "motherName"].includes(f.key) ? "upper" : undefined}
+                      value={value(f)}
+                      disabled={!editable || f.readOnly}
+                      onChange={(e) => set(f, ["name", "fatherName", "motherName"].includes(f.key) ? e.target.value.toUpperCase() : e.target.value)}
+                    />
+                  )
                 )}
               </Field>
             ))}

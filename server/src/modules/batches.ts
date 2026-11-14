@@ -12,13 +12,24 @@ import { fileUrl } from "../lib/storage.js";
 import { notifyAgent, notifySchool, notifySuperAdmins } from "../lib/notify.js";
 import { batchImpact } from "../lib/impact.js";
 
+// The printer may move a batch forward several steps at once, or back one step.
 const NEXT: Record<BatchStatus, BatchStatus[]> = {
-  SUBMITTED: ["IN_PROGRESS", "CANCELLED"],
-  IN_PROGRESS: ["PRINTED", "SUBMITTED"],
+  SUBMITTED: ["IN_PROGRESS", "PRINTED", "DELIVERED", "CANCELLED"],
+  IN_PROGRESS: ["PRINTED", "DELIVERED", "SUBMITTED"],
   PRINTED: ["DELIVERED", "IN_PROGRESS"],
-  DELIVERED: [],
+  DELIVERED: ["PRINTED"],
   CANCELLED: [],
 };
+
+/** Student and staff printing rounds used in a session (cancelled batches do not count). */
+async function roundsFor(school: { id: string; studentRounds: number; staffRounds: number }, session: string | null) {
+  const where = { schoolId: school.id, session, status: { not: "CANCELLED" as const } };
+  const [student, staff] = await Promise.all([
+    prisma.printBatch.count({ where: { ...where, studentCount: { gt: 0 } } }),
+    prisma.printBatch.count({ where: { ...where, staffCount: { gt: 0 } } }),
+  ]);
+  return { student: { allowed: school.studentRounds, used: student }, staff: { allowed: school.staffRounds, used: staff } };
+}
 
 function serializeBatch(b: PrintBatch & { school?: { name: string; code: string } | null; fulfillerAgent?: { name: string; company: string | null } | null }) {
   return {
@@ -97,6 +108,14 @@ export async function batchRoutes(app: FastifyInstance) {
     return { items: rows.map(serializeBatch), total, counts: Object.fromEntries(byStatus.map((s) => [s.status, s._count])) };
   });
 
+  // Printing rounds used and left this session, shown before a batch is created.
+  app.get("/rounds", async (req) => {
+    const p = principal(req);
+    const q = z.object({ schoolId: z.string().optional() }).parse(req.query);
+    const school = await targetSchool(p, q.schoolId);
+    return { session: school.currentSession, ...(await roundsFor(school, school.currentSession)), superAdmin: isSuper(p) };
+  });
+
   app.post("/", async (req) => {
     const p = principal(req);
     require(can.createBatch(p));
@@ -122,6 +141,7 @@ export async function batchRoutes(app: FastifyInstance) {
         : [];
     const staff = body.staffIds.length ? await prisma.staff.findMany({ where: { schoolId: school.id, deletedAt: null, reviewStatus: "APPROVED", photoKey: { not: null }, id: { in: body.staffIds } } }) : [];
     const skipped = body.allApproved ? 0 : body.studentIds.length - students.length + (body.staffIds.length - staff.length);
+    if ((body.studentIds.length || body.allApproved) && body.staffIds.length) throw badRequest("A print batch holds either students or staff. Create one batch for each.");
     if (!students.length && !staff.length) throw badRequest("Only approved records with a photo can be sent to print. None of the selected records qualify.");
 
     // Who prints: premium agents with own printing, otherwise ID Card Studio (central).
@@ -141,10 +161,11 @@ export async function batchRoutes(app: FastifyInstance) {
     }
 
     // Printing rounds per session (super admin may override).
-    if (students.length && school.studentRounds > 0 && !isSuper(p)) {
-      const used = await prisma.printBatch.count({ where: { schoolId: school.id, session, studentCount: { gt: 0 }, status: { not: "CANCELLED" } } });
-      if (used >= school.studentRounds) throw forbidden(`This school has used all ${school.studentRounds} student printing round${school.studentRounds === 1 ? "" : "s"} for ${session}. Contact ID Card Studio for another round.`);
-    }
+    const kind = students.length ? "student" : "staff";
+    const rounds = await roundsFor(school, session);
+    const r = rounds[kind];
+    if (r.allowed > 0 && r.used >= r.allowed && !isSuper(p))
+      throw forbidden(`This school has used all ${r.allowed} ${kind} printing round${r.allowed === 1 ? "" : "s"} for ${session}. Contact ID Card Studio for another round.`);
 
     const design = school.studentDesignId ? await prisma.design.findUnique({ where: { id: school.studentDesignId } }) : null;
     const batch = await prisma.$transaction(async (tx) => {
@@ -206,7 +227,7 @@ export async function batchRoutes(app: FastifyInstance) {
       else require(fulfils, "Only the printer of this batch can update production.");
     } else if (body.carrier !== undefined || body.tracking !== undefined) require(fulfils);
     const data: Prisma.PrintBatchUpdateInput = { carrier: body.carrier, tracking: body.tracking, name: body.name, status: body.status };
-    if (body.status === "PRINTED") data.printedAt = new Date();
+    if (body.status === "PRINTED" || (body.status === "DELIVERED" && !b.printedAt)) data.printedAt = new Date();
     if (body.status === "DELIVERED") data.deliveredAt = new Date();
     const updated = await prisma.$transaction(async (tx) => {
       if (body.status === "CANCELLED") {

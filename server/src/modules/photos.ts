@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { prisma } from "../lib/db.js";
 import { badRequest, notFound } from "../lib/errors.js";
-import { accessSchool, can, isAgent, principal, require, schoolWhere, targetSchool } from "../lib/access.js";
+import { accessSchool, can, isAgent, isSuper, principal, require, schoolWhere, targetSchool } from "../lib/access.js";
 import { audit } from "../lib/audit.js";
 import { isPdf, normalisePhoto, pdfPageCount } from "../lib/images.js";
 import { fileUrl, storage } from "../lib/storage.js";
@@ -133,45 +133,92 @@ export async function photoRoutes(app: FastifyInstance) {
     return { ok: true };
   });
 
-  // ---- Order forms (change sheet #6: all panels can upload) ----
+  // ---- Order forms (CtC order form): filled in by the agent or ID Card Studio for a
+  // school, with an optional scanned copy; the school admin can view them. ----
+  const formDetails = z.record(z.string().max(40), z.union([z.string().trim().max(500), z.boolean(), z.number()]));
+  const serializeForm = async (r: { id: string; schoolId: string; school: { name: string }; batch: { code: string } | null; fileName: string | null; size: number | null; note: string | null; details: unknown; createdAt: Date; storageKey: string | null; uploadedById: string | null }) => ({
+    id: r.id,
+    schoolId: r.schoolId,
+    schoolName: r.school.name,
+    batchCode: r.batch?.code ?? null,
+    fileName: r.fileName,
+    size: r.size,
+    note: r.note,
+    details: r.details ?? null,
+    createdAt: r.createdAt,
+    url: r.storageKey ? await storage.url(r.storageKey, 3600, r.fileName ?? undefined) : null,
+  });
+  const formInclude = { school: { select: { name: true } }, batch: { select: { code: true } } };
+
   app.get("/order-forms", async (req) => {
     const p = principal(req);
     const q = z.object({ schoolId: z.string().optional(), batchId: z.string().optional() }).parse(req.query);
     const where = { school: schoolWhere(p), ...(q.schoolId ? { schoolId: (await accessSchool(p, q.schoolId)).id } : {}), ...(q.batchId ? { batchId: q.batchId } : {}) };
-    const rows = await prisma.orderForm.findMany({ where, orderBy: { createdAt: "desc" }, include: { school: { select: { name: true } }, batch: { select: { code: true } } } });
-    return { items: await Promise.all(rows.map(async (r) => ({ id: r.id, schoolId: r.schoolId, schoolName: r.school.name, batchCode: r.batch?.code ?? null, fileName: r.fileName, size: r.size, note: r.note, createdAt: r.createdAt, url: await storage.url(r.storageKey, 3600, r.fileName) }))) };
+    const rows = await prisma.orderForm.findMany({ where, orderBy: { createdAt: "desc" }, include: formInclude });
+    return { items: await Promise.all(rows.map(serializeForm)) };
   });
 
+  // Multipart: schoolId, optional file (scan), details (JSON of the CtC form), note, batchId.
   app.post("/order-forms", async (req) => {
     const p = principal(req);
+    require(isSuper(p) || isAgent(p), "Order forms are filled in by your agent or ID Card Studio.");
     const { files, fields } = await readMultipart(req);
-    const school = await targetSchool(p, fields.schoolId);
+    const school = await accessSchool(p, fields.schoolId ?? "");
     const file = files[0];
-    if (!file) throw badRequest("Choose the order form file.");
-    const allowed = ["application/pdf", "image/jpeg", "image/png", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.ms-excel", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"];
-    if (!allowed.includes(file.mimetype)) throw badRequest("Upload the order form as PDF, image, Excel or Word.");
+    let details: Record<string, unknown> | null = null;
+    if (fields.details) {
+      try {
+        details = formDetails.parse(JSON.parse(fields.details));
+      } catch {
+        throw badRequest("The order form details could not be read.");
+      }
+    }
+    if (!file && !details) throw badRequest("Fill in the order form or attach the signed form.");
+    const allowed = ["application/pdf", "image/jpeg", "image/png", "image/webp", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.ms-excel", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"];
+    if (file && !allowed.includes(file.mimetype)) throw badRequest("Attach the order form as PDF, image, Excel or Word.");
     let batchId: string | null = null;
     if (fields.batchId) {
       const batch = await prisma.printBatch.findFirst({ where: { OR: [{ id: fields.batchId }, { code: fields.batchId }], schoolId: school.id } });
       if (!batch) throw notFound("Batch");
       batchId = batch.id;
     }
-    const key = `schools/${school.id}/order-forms/${randomToken(8)}-${safeName(file.filename).replace(/ /g, "_")}`;
-    await storage.put(key, file.buffer, file.mimetype);
-    const row = await prisma.orderForm.create({ data: { schoolId: school.id, batchId, fileName: safeName(file.filename), storageKey: key, mime: file.mimetype, size: file.buffer.length, note: fields.note?.slice(0, 500), uploadedById: p.userId } });
-    await audit(req, { action: "order_form.uploaded", summary: `${p.name} uploaded order form ${row.fileName} for ${school.name}`, schoolId: school.id, entityType: "order_form", entityId: row.id });
-    await notifySchool(school.id, `Order form uploaded for ${school.name}`, row.fileName, "printing", true);
-    await notifySuperAdmins(`Order form uploaded for ${school.name}`, row.fileName, "printing");
-    return { id: row.id, fileName: row.fileName };
+    let stored: { fileName: string; storageKey: string; mime: string; size: number } | null = null;
+    if (file) {
+      const key = `schools/${school.id}/order-forms/${randomToken(8)}-${safeName(file.filename).replace(/ /g, "_")}`;
+      await storage.put(key, file.buffer, file.mimetype);
+      stored = { fileName: safeName(file.filename), storageKey: key, mime: file.mimetype, size: file.buffer.length };
+    }
+    const row = await prisma.orderForm.create({
+      data: { schoolId: school.id, batchId, ...(stored ?? {}), details: (details ?? undefined) as never, note: fields.note?.slice(0, 500), uploadedById: p.userId },
+      include: formInclude,
+    });
+    const label = row.fileName ?? "CtC order form";
+    await audit(req, { action: "order_form.uploaded", summary: `${p.name} added order form (${label}) for ${school.name}`, schoolId: school.id, entityType: "order_form", entityId: row.id });
+    await notifySchool(school.id, `Order form added for ${school.name}`, label, "printing", true);
+    await notifySuperAdmins(`Order form added for ${school.name}`, label, "printing");
+    return serializeForm(row);
   });
 
-  app.delete("/order-forms/:id", async (req) => {
+  app.patch("/order-forms/:id", async (req) => {
     const p = principal(req);
+    require(isSuper(p) || isAgent(p), "Only the agent or ID Card Studio can change an order form.");
     const row = await prisma.orderForm.findFirst({ where: { id: (req.params as { id: string }).id, school: schoolWhere(p) } });
     if (!row) throw notFound("Order form");
-    require(row.uploadedById === p.userId || can.manageSchools(p), "Only the uploader or a super admin can remove this file.");
+    const body = z.object({ details: formDetails.optional(), note: z.string().max(500).optional() }).parse(req.body);
+    const updated = await prisma.orderForm.update({ where: { id: row.id }, data: { details: (body.details ?? undefined) as never, note: body.note }, include: formInclude });
+    await audit(req, { action: "order_form.updated", summary: `${p.name} updated an order form for ${updated.school.name}`, schoolId: row.schoolId, entityType: "order_form", entityId: row.id });
+    return serializeForm(updated);
+  });
+
+  // Only the school's agent or a super admin may delete an order form.
+  app.delete("/order-forms/:id", async (req) => {
+    const p = principal(req);
+    require(isSuper(p) || isAgent(p), "Only the agent or ID Card Studio can delete an order form.");
+    const row = await prisma.orderForm.findFirst({ where: { id: (req.params as { id: string }).id, school: schoolWhere(p) } });
+    if (!row) throw notFound("Order form");
     await prisma.orderForm.delete({ where: { id: row.id } });
-    await storage.remove(row.storageKey).catch(() => undefined);
+    if (row.storageKey) await storage.remove(row.storageKey).catch(() => undefined);
+    await audit(req, { action: "order_form.deleted", summary: `${p.name} deleted order form ${row.fileName ?? ""}`.trim(), schoolId: row.schoolId, entityType: "order_form", entityId: row.id });
     return { ok: true };
   });
 }
