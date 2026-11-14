@@ -24,6 +24,12 @@ import {
   download,
   csvText,
   studentPhoto,
+  photoNumber,
+  printRounds,
+  batchSession,
+  cardRecord,
+  currentSession,
+  exportStudents,
   validPhoto,
 } from "../lib.js";
 import { getFile, putFile, deleteFile } from "../files.js";
@@ -228,9 +234,11 @@ export function PhotoUploads({ ctx }) {
     setBusy(true);
     let skipped = 0;
     const results = [];
-    const names = new Set(images.map((photo) => photo.name));
+    const matches = new Map();
+    const names = new Set(images.map((photo) => photoNumber(photo.name)));
     for (const file of list) {
-      if (!validPhoto(file) || names.has(file.name)) {
+      const number = photoNumber(file.name);
+      if (!validPhoto(file) || !number || names.has(number)) {
         skipped++;
         continue;
       }
@@ -239,7 +247,8 @@ export function PhotoUploads({ ctx }) {
         const preview = await studentPhoto(file);
         await putFile(id, await (await fetch(preview)).blob());
         results.push({ id, school: school.id, name: file.name, fileKey: id });
-        names.add(file.name);
+        names.add(number);
+        matches.set(number, preview);
       } catch {
         skipped++;
       }
@@ -247,7 +256,21 @@ export function PhotoUploads({ ctx }) {
     if (results.length)
       update((d) =>
         log(
-          { ...d, photoLibrary: [...d.photoLibrary, ...results] },
+          {
+            ...d,
+            photoLibrary: [...d.photoLibrary, ...results],
+            students: d.students.map((student) =>
+              student.school === school.id &&
+              !student.photo &&
+              matches.has(photoNumber(student.photoNo))
+                ? {
+                    ...student,
+                    photo: matches.get(photoNumber(student.photoNo)),
+                    photoSource: "School photo library",
+                  }
+                : student,
+            ),
+          },
           `Added ${results.length} photos to ${school.name}`,
           "image",
         ),
@@ -537,7 +560,8 @@ export function PhotoUploads({ ctx }) {
                   {busy ? "Saving photos…" : "Add individual photos"}
                 </strong>
                 <span>
-                  JPG, PNG, WebP · up to 15 MB each · 200 files at a time
+                  JPG, PNG, WebP · up to 15 MB each · name files by photo number
+                  to link them automatically
                 </span>
                 <input
                   type="file"
@@ -791,11 +815,20 @@ export function Designs({ ctx }) {
                     <Button
                       variant="secondary"
                       onClick={() => {
-                        update((x) => ({ ...x, lanyard: d.name }));
+                        update((x) => ({
+                          ...x,
+                          schoolLanyards: {
+                            ...x.schoolLanyards,
+                            [school.id]: d.name,
+                          },
+                        }));
                         notify(`${d.name} selected as the school lanyard.`);
                       }}
                     >
-                      {data.lanyard === d.name ? "Selected" : "Choose"}
+                      {(data.schoolLanyards?.[school.id] || data.lanyard) ===
+                      d.name
+                        ? "Selected"
+                        : "Choose"}
                     </Button>
                   )}
                 </div>
@@ -915,90 +948,569 @@ export function Designs({ ctx }) {
     </>
   );
 }
-function OrderForms({ ctx, batches }) {
-  const { data, school, update, log, notify } = ctx;
-  const [open, setOpen] = useState(false);
-  const [file, setFile] = useState(null);
-  const [batch, setBatch] = useState("");
-  const [note, setNote] = useState("");
-  const [saving, setSaving] = useState(false);
-  const forms = (data.orderForms || []).filter(
-    (form) => form.school === school.id,
+const ORDER_SECTIONS = [
+  {
+    title: "School",
+    fields: [
+      ["srNo", "Sr. no."],
+      ["date", "Date", "date"],
+      ["schoolName", "School name", "text", true],
+      ["address", "Address", "wide"],
+      ["contactNo", "Contact no.", "tel"],
+      ["email", "Email ID", "email"],
+      ["emailPrint", "Email on card", ["To print", "Not to print"]],
+      ["website", "Website"],
+      ["websitePrint", "Website on card", ["To print", "Not to print"]],
+      ["design", "Design", "wide"],
+    ],
+  },
+  {
+    title: "Card",
+    fields: [
+      [
+        "schoolLogo",
+        "School logo",
+        ["Received", "Not received", "Not applicable"],
+      ],
+      ["cardType", "Card type", ["Normal", "Scratch proof"]],
+      [
+        "issuingAuthority",
+        "Issuing authority",
+        ["Director", "Principal", "Head Master", "Head Mistress"],
+      ],
+      [
+        "signature",
+        "Signature",
+        ["Received", "Not received", "Not applicable"],
+      ],
+    ],
+  },
+  {
+    title: "Dori (lanyard)",
+    fields: [
+      ["doriType", "Dori type", ["Digital", "Soft", "Mattee", "Border"]],
+      [
+        "doriColour",
+        "Dori colour",
+        ["Royal Blue", "Navy Blue", "Red", "Yellow"],
+        false,
+        "Subject to availability",
+      ],
+      ["printOnDories", "Print on dories", "wide"],
+      [
+        "doriCount",
+        "No. of dori",
+        "number",
+        false,
+        "Extra dories must be purchased by the school",
+      ],
+    ],
+  },
+  {
+    title: "Holder (H. details)",
+    fields: [
+      ["holderOrientation", "Orientation", ["Horizontal", "Vertical"]],
+      ["holderSticky", "Sticky", ["Sticky", "Non sticky"]],
+      ["holderSides", "Sides", ["Single sided", "Double sided"]],
+      ["holderSize", "Size", ["Small", "Normal"]],
+      ["attachment", "Attachment", ["With hook", "Without hook"]],
+    ],
+  },
+  {
+    title: "Staff member (from Sonepat)",
+    note: "18% GST will be applicable on the overall amount.",
+    fields: [
+      ["staffName", "Name"],
+      ["staffContact", "Contact no.", "tel"],
+      ["rate", "Rate (₹)", "number"],
+      ["advance", "Advance (₹)", "number"],
+      ["extraDoriRate", "Rate for extra dories (₹)", "number"],
+    ],
+  },
+  {
+    title: "Authorised person's details",
+    fields: [
+      ["authName", "Name"],
+      ["authDesignation", "Designation"],
+      ["authContact", "Contact no.", "tel"],
+    ],
+  },
+  {
+    title: "Remarks",
+    fields: [["remarks", "Remarks (if any)", "wide"]],
+  },
+];
+const ORDER_TERMS = [
+  "The overall job is expected to be completed within 10 days after finalisation of data.",
+  "CtC will not be responsible for any mistake found after proof reading.",
+  "Colour on card may be in a slightly different shade due to the thermal process.",
+  "Photography will take place two times maximum (if applicable).",
+  "The institution has to provide data and photographs in soft format after two visits of the photographer.",
+];
+
+const formValue = (v) =>
+  v === true
+    ? "Yes"
+    : v === false
+      ? "No"
+      : v == null || v === ""
+        ? "—"
+        : String(v);
+
+function printOrderForm(f, onBlocked) {
+  const d = f.details || {};
+  const esc = (s) =>
+    String(s).replace(
+      /[&<>"]/g,
+      (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c],
+    );
+  const body =
+    ORDER_SECTIONS.map(
+      (s) =>
+        `<h2>${esc(s.title)}</h2><table>${s.fields
+          .map(
+            ([k, l, t]) =>
+              `<tr><th>${esc(l)}</th><td>${esc(t === "date" && d[k] ? fmtDate(d[k]) : formValue(d[k]))}</td></tr>`,
+          )
+          .join("")}</table>`,
+    ).join("") +
+    `<h2>Terms &amp; conditions</h2><ol>${ORDER_TERMS.map((t) => `<li>${esc(t)}</li>`).join("")}</ol>`;
+  const w = window.open("", "_blank");
+  if (!w) {
+    onBlocked();
+    return;
+  }
+  w.opener = null;
+  w.document.write(
+    `<!doctype html><html><head><meta charset="utf-8"><title>Order form · ${esc(f.schoolName)}</title><style>body{font:14px/1.5 system-ui,sans-serif;margin:32px;color:#111}h1{font-size:20px;margin:0 0 4px}h2{font-size:15px;margin:20px 0 6px;border-bottom:1px solid #999}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:5px 8px;border-bottom:1px solid #ddd;vertical-align:top}th{width:40%;font-weight:600}p{color:#555;margin:0}</style></head><body><h1>CtC Id Solutions · ID card order form</h1><p>G-16, City Plaza, Near Axis Bank, Old D.C. Road, Sonipat-131001</p><p>${esc(f.schoolName)}${f.note ? " · " + esc(f.note) : ""}</p>${body}<script>window.onload=()=>window.print()</script></body></html>`,
   );
-  const close = () => {
-    setOpen(false);
-    setFile(null);
-    setBatch("");
-    setNote("");
+  w.document.close();
+}
+
+function OrderFormEditor({ ctx, form, schools, onClose }) {
+  const { notify, update, log } = ctx;
+  const first = form?.school || ctx.school.id;
+  const schoolOf = (id) => schools.find((s) => s.id === id);
+  const prefill = (id) => {
+    const s = schoolOf(id) || {};
+    return {
+      date: new Date().toISOString().slice(0, 10),
+      schoolName: s.name || "",
+      address: [s.address, s.city, s.state, s.pin].filter(Boolean).join(", "),
+      contactNo: s.phone || "",
+      email: s.email || "",
+      authName: s.principal || "",
+      authDesignation: s.principal ? "Principal" : "",
+    };
   };
-  const save = async (event) => {
-    event.preventDefault();
-    if (!file || saving) return;
-    if (
-      !/\.(pdf|jpe?g|png|webp|xlsx?|docx?)$/i.test(file.name) ||
-      !file.size ||
-      file.size > 15 * 1024 * 1024
-    ) {
-      notify("Choose a PDF, image, Excel, or Word file up to 15 MB.", "error");
-      return;
-    }
-    setSaving(true);
+  const [schoolId, setSchoolId] = useState(first);
+  // "fill": the CtC form on screen; "upload": only a scan or photo of a filled paper form.
+  const [mode, setMode] = useState(form && !form.details ? "upload" : "fill");
+  const [d, setD] = useState(form?.details || prefill(first));
+  const [note, setNote] = useState(form?.note || "");
+  const [file, setFile] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const set = (k, v) => setD((x) => ({ ...x, [k]: v }));
+  const save = async (e) => {
+    e.preventDefault();
+    if (file && file.size > 10 * 1024 * 1024)
+      return notify("The file must be under 10 MB.", "error");
+    if (mode === "upload" && !form?.fileKey && !file)
+      return notify("Choose the filled order form to upload.", "error");
+    const details =
+      mode === "fill"
+        ? Object.fromEntries(
+            Object.entries(d)
+              .filter(([, v]) => v !== "" && v != null)
+              .map(([k, v]) => [k, String(v)]),
+          )
+        : null;
+    setBusy(true);
     try {
-      const id = uid("FORM");
-      await putFile(id, file);
-      const form = {
+      const id = form?.id || uid("OF");
+      if (file && !/\.(pdf|jpe?g|png|webp)$/i.test(file.name))
+        throw new Error("Choose a PDF or image.");
+      if (file) await putFile(id, file);
+      const saved = {
+        ...form,
         id,
-        school: school.id,
-        name: file.name,
-        fileKey: id,
-        batch,
+        school: schoolId,
+        schoolName: schoolOf(schoolId)?.name,
+        name: file?.name || form?.name || "CtC order form",
+        details,
         note: note.trim(),
-        date: new Date().toISOString(),
+        fileKey: file ? id : form?.fileKey,
+        date: form?.date || new Date().toISOString(),
       };
-      update((d) =>
+      update((data) =>
         log(
-          { ...d, orderForms: [form, ...(d.orderForms || [])] },
-          `Attached order form ${file.name}`,
+          {
+            ...data,
+            orderForms: form
+              ? (data.orderForms || []).map((entry) =>
+                  entry.id === id ? saved : entry,
+                )
+              : [saved, ...(data.orderForms || [])],
+          },
+          form ? "Updated a CtC order form" : "Added a CtC order form",
           "print",
         ),
       );
-      close();
-      notify("Print order form saved.");
-    } catch {
-      notify("Could not save this order form. Try again.", "error");
+      notify(
+        form
+          ? "Order form updated."
+          : `Order form saved. ${schoolOf(schoolId)?.name || "The school"} can now see it.`,
+      );
+      onClose();
+    } catch (err) {
+      notify(err.message, "error");
     } finally {
-      setSaving(false);
+      setBusy(false);
     }
   };
-  const getForm = async (form) => {
+  return (
+    <Modal
+      wide
+      title={form ? "Edit order form" : "New order form"}
+      subtitle="CtC Id Solutions ID card order form. The school can view and print it but not change it."
+      onClose={busy ? undefined : onClose}
+    >
+      <form onSubmit={save}>
+        <div className="modal-body order-form">
+          {!form && (
+            <div
+              className="segmented"
+              role="tablist"
+              aria-label="How to add the order form"
+            >
+              {[
+                ["fill", "Fill online"],
+                ["upload", "Upload signed copy"],
+              ].map(([m, l]) => (
+                <button
+                  key={m}
+                  type="button"
+                  role="tab"
+                  aria-selected={mode === m}
+                  className={mode === m ? "active" : ""}
+                  onClick={() => setMode(m)}
+                >
+                  {l}
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="form-grid">
+            <Field label="School" required>
+              <select
+                required
+                disabled={Boolean(form)}
+                value={schoolId}
+                onChange={(e) => {
+                  setSchoolId(e.target.value);
+                  setD({ ...d, ...prefill(e.target.value) });
+                }}
+              >
+                {schools.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            {!form && (
+              <Field
+                label={
+                  mode === "upload"
+                    ? "Filled order form"
+                    : "Signed scan (optional)"
+                }
+                required={mode === "upload"}
+                hint="PDF or photo, up to 10 MB"
+              >
+                <input
+                  type="file"
+                  accept=".pdf,.jpg,.jpeg,.png,.webp"
+                  onChange={(e) => setFile(e.target.files?.[0] || null)}
+                />
+              </Field>
+            )}
+          </div>
+          {mode === "fill" &&
+            ORDER_SECTIONS.map((sec) => (
+              <fieldset key={sec.title} className="order-section">
+                <legend>{sec.title}</legend>
+                {sec.note && <p className="muted small-note">{sec.note}</p>}
+                <div className="form-grid">
+                  {sec.fields.map(([k, l, t, req, hint]) =>
+                    Array.isArray(t) ? (
+                      <div key={k} className="field choice-field">
+                        <span className="field-label">
+                          {l}
+                          {hint && <small className="muted"> · {hint}</small>}
+                        </span>
+                        <div
+                          className="choice-row"
+                          role="radiogroup"
+                          aria-label={l}
+                        >
+                          {t.map((o) => (
+                            <label
+                              key={o}
+                              className={`choice ${d[k] === o ? "on" : ""}`}
+                            >
+                              <input
+                                type="radio"
+                                name={k}
+                                checked={d[k] === o}
+                                onChange={() => set(k, o)}
+                              />
+                              {o}
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    ) : t === "date" ? (
+                      <Field key={k} label={l}>
+                        <input
+                          type="date"
+                          value={d[k] || ""}
+                          onChange={(e) => set(k, e.target.value)}
+                        />
+                      </Field>
+                    ) : (
+                      <Field
+                        key={k}
+                        label={l}
+                        required={req}
+                        hint={hint}
+                        className={t === "wide" ? "span-2" : undefined}
+                      >
+                        {t === "wide" ? (
+                          <textarea
+                            rows="2"
+                            maxLength="500"
+                            value={d[k] || ""}
+                            onChange={(e) => set(k, e.target.value)}
+                          />
+                        ) : (
+                          <input
+                            required={req}
+                            type={
+                              t === "number"
+                                ? "number"
+                                : t === "email"
+                                  ? "email"
+                                  : t === "tel"
+                                    ? "tel"
+                                    : "text"
+                            }
+                            min={t === "number" ? "0" : undefined}
+                            maxLength="200"
+                            value={d[k] ?? ""}
+                            onChange={(e) => set(k, e.target.value)}
+                          />
+                        )}
+                      </Field>
+                    ),
+                  )}
+                </div>
+              </fieldset>
+            ))}
+          {mode === "fill" && (
+            <div className="order-terms">
+              <strong>Terms &amp; conditions</strong>
+              <ol>
+                {ORDER_TERMS.map((t) => (
+                  <li key={t}>{t}</li>
+                ))}
+              </ol>
+            </div>
+          )}
+          <Field label="Note (optional)">
+            <input
+              maxLength="500"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+            />
+          </Field>
+        </div>
+        <div className="modal-actions">
+          <Button
+            variant="secondary"
+            type="button"
+            disabled={busy}
+            onClick={onClose}
+          >
+            Cancel
+          </Button>
+          <Button type="submit" disabled={busy}>
+            {busy ? "Saving…" : form ? "Save changes" : "Save order form"}
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function OrderFormView({ form, onClose, onDownload, notify }) {
+  const d = form.details || {};
+  return (
+    <Modal
+      wide
+      title={`Order form · ${form.schoolName}`}
+      subtitle={`Filled on ${fmtDate(form.date || form.createdAt)}${form.note ? " · " + form.note : ""}`}
+      onClose={onClose}
+    >
+      <div className="modal-body">
+        {!form.details && (
+          <p className="muted">
+            This order form was uploaded as a file. Open it with the button
+            below.
+          </p>
+        )}
+        {form.details &&
+          ORDER_SECTIONS.map((sec) => (
+            <div key={sec.title} className="order-view">
+              <h3>{sec.title}</h3>
+              {sec.note && <p className="muted small-note">{sec.note}</p>}
+              <dl>
+                {sec.fields.map(([k, l, t]) => (
+                  <React.Fragment key={k}>
+                    <dt>{l}</dt>
+                    <dd>
+                      {t === "date" && d[k] ? fmtDate(d[k]) : formValue(d[k])}
+                    </dd>
+                  </React.Fragment>
+                ))}
+              </dl>
+            </div>
+          ))}
+        {form.details && (
+          <div className="order-terms">
+            <strong>Terms &amp; conditions</strong>
+            <ol>
+              {ORDER_TERMS.map((t) => (
+                <li key={t}>{t}</li>
+              ))}
+            </ol>
+          </div>
+        )}
+      </div>
+      <div className="modal-actions">
+        {form.fileKey && (
+          <Button
+            variant="secondary"
+            icon="download"
+            onClick={() => onDownload(form)}
+          >
+            {form.details ? "Download signed copy" : "Download order form"}
+          </Button>
+        )}
+        {form.details && (
+          <Button
+            variant="secondary"
+            onClick={() =>
+              printOrderForm(form, () =>
+                notify(
+                  "Allow pop-ups to open the printable order form.",
+                  "error",
+                ),
+              )
+            }
+          >
+            <Icon name="print" size={15} /> Print
+          </Button>
+        )}
+        <Button onClick={onClose}>Close</Button>
+      </div>
+    </Modal>
+  );
+}
+
+function OrderForms({ ctx }) {
+  const { data, role, school, availableSchools, update, notify, log } = ctx;
+  const canManage = role !== "school";
+  const [edit, setEdit] = useState(null);
+  const [view, setView] = useState(null);
+  const [remove, setRemove] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+  const [schoolFilter, setSchoolFilter] = useState("");
+  const allowed = new Set(
+    (canManage ? availableSchools : [school]).map((entry) => entry.id),
+  );
+  const forms = (data.orderForms || [])
+    .filter(
+      (entry) =>
+        allowed.has(entry.school) &&
+        (!schoolFilter || schoolFilter === entry.school),
+    )
+    .map((entry) => ({
+      ...entry,
+      schoolName:
+        entry.schoolName ||
+        data.schools.find((row) => row.id === entry.school)?.name,
+    }));
+  const downloadForm = async (form) => {
     try {
-      const attachment = await getFile(form.fileKey);
-      if (!attachment) throw Error("File missing");
-      download(form.name, attachment, attachment.type);
+      const file = await getFile(form.fileKey);
+      if (!file) throw new Error("File unavailable");
+      download(form.name, file, file.type || "application/octet-stream");
     } catch {
-      notify("This attachment is unavailable in this browser.", "error");
+      notify("The saved attachment is unavailable in this browser.", "error");
+    }
+  };
+  const deleteForm = async () => {
+    setDeleting(true);
+    try {
+      if (remove.fileKey) await deleteFile(remove.fileKey);
+      update((d) =>
+        log(
+          {
+            ...d,
+            orderForms: (d.orderForms || []).filter(
+              (entry) => entry.id !== remove.id,
+            ),
+          },
+          "Removed a CtC order form",
+          "print",
+        ),
+      );
+      setRemove(null);
+      notify("Order form deleted.");
+    } catch {
+      notify("Could not remove the saved file.", "error");
+    } finally {
+      setDeleting(false);
     }
   };
   return (
     <Panel
-      title="Print order forms"
-      subtitle={school.name}
+      title="Order forms"
+      subtitle={
+        canManage
+          ? "CtC Id Solutions · Fill online or upload a signed copy."
+          : `Order forms for ${school.name}`
+      }
       action={
-        <Button variant="secondary" icon="upload" onClick={() => setOpen(true)}>
-          Attach order form
-        </Button>
+        canManage && (
+          <Button icon="plus" onClick={() => setEdit({})}>
+            New order form
+          </Button>
+        )
       }
     >
-      {ctx.role !== "school" && ctx.availableSchools.length > 1 && (
-        <div className="padded">
-          <Field label="School for order forms">
+      {canManage && availableSchools.length > 1 && (
+        <div className="table-toolbar">
+          <Field label="Filter order forms by school">
             <select
-              value={school.id}
-              onChange={(e) => ctx.setSchoolId(e.target.value)}
+              value={schoolFilter}
+              onChange={(e) => setSchoolFilter(e.target.value)}
             >
-              {ctx.availableSchools.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.name}
+              <option value="">All schools</option>
+              {availableSchools.map((row) => (
+                <option key={row.id} value={row.id}>
+                  {row.name}
                 </option>
               ))}
             </select>
@@ -1010,9 +1522,10 @@ function OrderForms({ ctx, batches }) {
           <table className="phone-records">
             <thead>
               <tr>
-                <th>ATTACHMENT</th>
-                <th>BATCH</th>
-                <th>ADDED</th>
+                <th>SCHOOL</th>
+                <th>CARD</th>
+                <th>LANYARD</th>
+                <th>DATE</th>
                 <th>ACTIONS</th>
               </tr>
             </thead>
@@ -1020,22 +1533,45 @@ function OrderForms({ ctx, batches }) {
               {forms.map((form) => (
                 <tr key={form.id}>
                   <td className="phone-record-title">
-                    <strong>{form.name}</strong>
-                    {form.note && (
-                      <small className="block muted">{form.note}</small>
-                    )}
+                    <strong>{form.schoolName}</strong>
+                    <small className="block muted">
+                      {form.note || form.name}
+                    </small>
                   </td>
-                  <td data-label="BATCH">
-                    {batches.find((b) => b.id === form.batch)?.name ||
-                      "Unlinked"}
+                  <td data-label="Card">
+                    {form.details?.cardType ||
+                      (form.fileKey ? "Uploaded copy" : "—")}
                   </td>
-                  <td data-label="ADDED">{fmtDate(form.date)}</td>
+                  <td data-label="Lanyard">
+                    {[form.details?.doriType, form.details?.doriCount]
+                      .filter(Boolean)
+                      .join(" · ") || "—"}
+                  </td>
+                  <td data-label="Date">
+                    {fmtDate(form.details?.date || form.date || form.createdAt)}
+                  </td>
                   <td className="phone-record-actions">
-                    <IconButton
-                      icon="download"
-                      label={`Download ${form.name}`}
-                      onClick={() => getForm(form)}
-                    />
+                    <div className="row-actions">
+                      <IconButton
+                        icon="eye"
+                        label="View order form"
+                        onClick={() => setView(form)}
+                      />
+                      {canManage && form.details && (
+                        <IconButton
+                          icon="edit"
+                          label="Edit order form"
+                          onClick={() => setEdit(form)}
+                        />
+                      )}
+                      {canManage && (
+                        <IconButton
+                          icon="trash"
+                          label="Delete order form"
+                          onClick={() => setRemove(form)}
+                        />
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -1045,59 +1581,47 @@ function OrderForms({ ctx, batches }) {
       ) : (
         <Empty
           title="No order forms yet"
-          text="Attach a PDF, image, Excel, or Word file. You can link it to a print batch."
+          text={
+            canManage
+              ? "Create an order form for a school or upload a signed copy."
+              : "Forms will appear here when your agent adds them."
+          }
         />
       )}
-      {open && (
+      {edit && canManage && (
+        <OrderFormEditor
+          ctx={ctx}
+          form={edit.id ? edit : null}
+          schools={availableSchools}
+          onClose={() => setEdit(null)}
+        />
+      )}
+      {view && (
+        <OrderFormView
+          form={view}
+          onClose={() => setView(null)}
+          onDownload={downloadForm}
+          notify={notify}
+        />
+      )}
+      {remove && canManage && (
         <Modal
-          title="Attach a print order form"
-          subtitle={school.name}
-          onClose={saving ? undefined : close}
+          title="Delete order form?"
+          subtitle={remove.schoolName}
+          onClose={deleting ? undefined : () => setRemove(null)}
         >
-          <form onSubmit={save}>
-            <div className="modal-body">
-              <Field
-                label="Order form file"
-                required
-                hint="PDF, JPG, PNG, WebP, Excel, or Word · up to 15 MB"
-              >
-                <input
-                  type="file"
-                  required
-                  accept=".pdf,.jpg,.jpeg,.png,.webp,.xls,.xlsx,.doc,.docx"
-                  onChange={(e) => setFile(e.target.files[0])}
-                />
-              </Field>
-              <Field label="Print batch (optional)">
-                <select
-                  value={batch}
-                  onChange={(e) => setBatch(e.target.value)}
-                >
-                  <option value="">No batch selected</option>
-                  {batches.map((b) => (
-                    <option key={b.id} value={b.id}>
-                      {b.name}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <Field label="Notes (optional)">
-                <textarea
-                  rows="3"
-                  value={note}
-                  onChange={(e) => setNote(e.target.value)}
-                />
-              </Field>
-            </div>
-            <div className="modal-actions">
-              <Button variant="secondary" disabled={saving} onClick={close}>
-                Cancel
-              </Button>
-              <Button type="submit" disabled={!file || saving} icon="upload">
-                {saving ? "Saving…" : "Save order form"}
-              </Button>
-            </div>
-          </form>
+          <div className="modal-actions">
+            <Button
+              variant="secondary"
+              disabled={deleting}
+              onClick={() => setRemove(null)}
+            >
+              Keep form
+            </Button>
+            <Button disabled={deleting} onClick={deleteForm}>
+              Delete form
+            </Button>
+          </div>
         </Modal>
       )}
     </Panel>
@@ -1117,46 +1641,101 @@ export function PrintOrders({ ctx }) {
   } = ctx;
   const [batchQuery, setBatchQuery] = useState(""),
     [batchStatus, setBatchStatus] = useState(""),
-    [create, setCreate] = useState(false),
+    [fulfilledBy, setFulfilledBy] = useState(""),
+    [kind, setKind] = useState("student"),
+    [confirmBatch, setConfirmBatch] = useState(false),
+    [create, setCreate] = useState(ctx.record === "createBatch"),
     [name, setName] = useState(""),
     [selected, setSelected] = useState([]),
     [staffIds, setStaffIds] = useState([]),
-    [detail, setDetail] = useState(null),
+    [detail, setDetail] = useState(
+      () =>
+        data.batches.find(
+          (row) =>
+            row.id === ctx.record &&
+            (role === "school"
+              ? row.school === school.id
+              : availableSchools.some((entry) => entry.id === row.school)),
+        ) || null,
+    ),
     [removeBatch, setRemoveBatch] = useState(null),
-    [nextStatus, setNextStatus] = useState(""),
-    [tracking, setTracking] = useState(""),
-    [carrier, setCarrier] = useState("");
+    [nextStatus, setNextStatus] = useState(detail?.status || ""),
+    [tracking, setTracking] = useState(detail?.tracking || ""),
+    [carrier, setCarrier] = useState(detail?.carrier || "");
   const canProduce = ["super", "premium"].includes(role);
+  const canDownload = role !== "regular";
   const students = schoolStudents.filter(eligible);
+  const staffReady = (entry) =>
+    entry.printStatus === "Approved" &&
+    entry.status === "Active" &&
+    Boolean(entry.photo);
   const staff = data.staff.filter(
-    (s) =>
-      s.school === school.id &&
-      s.printStatus === "Approved" &&
-      s.status === "Active",
+    (entry) => entry.school === school.id && staffReady(entry),
+  );
+  const pickableSchools = availableSchools.filter(
+    (entry) =>
+      entry.id === school.id ||
+      data.students.some(
+        (student) =>
+          student.school === entry.id &&
+          student.session === currentSession(data, entry.id) &&
+          eligible(student),
+      ) ||
+      data.staff.some(
+        (member) => member.school === entry.id && staffReady(member),
+      ),
   );
   const batches = data.batches.filter(
-    (b) =>
-      (role === "super" || availableSchools.some((s) => s.id === b.school)) &&
-      (role !== "school" || b.school === school.id),
+    (batch) =>
+      availableSchools.some((entry) => entry.id === batch.school) &&
+      (role !== "school" || batch.school === school.id) &&
+      batchSession(batch) === ctx.session,
   );
+  const { allowed, used, remaining } = printRounds(
+    data.batches,
+    school,
+    ctx.session,
+    kind,
+  );
+  const blocked = remaining === 0 && role !== "super";
+  const source = kind === "student" ? students : staff;
+  const picked = kind === "student" ? selected : staffIds;
+  const setPicked = kind === "student" ? setSelected : setStaffIds;
+  const openCreate = () => {
+    setSelected([]);
+    setStaffIds([]);
+    setKind("student");
+    setConfirmBatch(false);
+    setName("");
+    setCreate(true);
+  };
   const submit = () => {
-    const chosen = students.filter((s) => selected.includes(s.id));
-    const chosenStaff = staff.filter((s) => staffIds.includes(s.id));
-    if (!chosen.length && !chosenStaff.length) return;
+    const chosen =
+      kind === "student" ? students.filter((s) => selected.includes(s.id)) : [];
+    const chosenStaff =
+      kind === "staff" ? staff.filter((s) => staffIds.includes(s.id)) : [];
+    if (!confirmBatch || blocked || (!chosen.length && !chosenStaff.length))
+      return;
     const batch = {
       id: uid("B"),
       name: name.trim() || `${school.name} · ${fmtDate(new Date())}`,
       school: school.id,
+      session: ctx.session,
+      kind,
       count: chosen.length + chosenStaff.length,
       studentIds: chosen.map((s) => s.id),
       staffIds: chosenStaff.map((s) => s.id),
-      snapshot: structuredClone(chosen),
-      staffSnapshot: structuredClone(chosenStaff),
-      status: "In progress",
+      snapshot: chosen.map((entry) => cardRecord(data, school.id, entry)),
+      staffSnapshot: chosenStaff.map((entry) =>
+        cardRecord(data, school.id, entry, true),
+      ),
+      status: "Submitted",
       date: new Date().toISOString(),
       owner:
-        role === "premium" && data.ownPrinting
-          ? "Northstar Print Co."
+        role === "premium" &&
+        (data.agentPrinting?.[ctx.agentId] ?? data.ownPrinting)
+          ? data.agents.find((entry) => entry.id === ctx.agentId)?.company ||
+            ctx.userProfile.name
           : "ID Studio",
       design: ctx.design,
       tracking: "",
@@ -1167,6 +1746,18 @@ export function PrintOrders({ ctx }) {
         {
           ...d,
           batches: [batch, ...d.batches],
+          notifications: [
+            {
+              id: uid("NOTICE"),
+              page: "printing",
+              school: school.id,
+              batch: batch.id,
+              title: "Print batch submitted",
+              text: batch.name,
+              read: false,
+            },
+            ...d.notifications,
+          ],
           students: d.students.map((s) =>
             chosen.some((x) => x.id === s.id)
               ? { ...s, status: "Submitted for print", batch: batch.id }
@@ -1192,7 +1783,7 @@ export function PrintOrders({ ctx }) {
     const batch = removeBatch;
     if (
       !batch ||
-      (role !== "super" && !["In progress", "Cancelled"].includes(batch.status))
+      (role !== "super" && !["Submitted", "Cancelled"].includes(batch.status))
     )
       return;
     update((d) =>
@@ -1238,6 +1829,10 @@ export function PrintOrders({ ctx }) {
   const visibleBatches = batches.filter(
     (b) =>
       (!batchStatus || b.status === batchStatus) &&
+      (!fulfilledBy ||
+        (["ID Studio", "ID Card Studio"].includes(b.owner)
+          ? "studio"
+          : "agent") === fulfilledBy) &&
       `${b.name} ${b.id} ${data.schools.find((s) => s.id === b.school)?.name}`
         .toLowerCase()
         .includes(batchQuery.toLowerCase()),
@@ -1284,14 +1879,16 @@ export function PrintOrders({ ctx }) {
         title="Great IDs. A smoother finish."
         description="Group approved cards into a batch and follow every step through delivery."
       >
-        <Button
-          variant="secondary"
-          icon="review"
-          onClick={() => ctx.go("review")}
-        >
-          Review submissions
-        </Button>
-        <Button icon="plus" onClick={() => setCreate(true)}>
+        {["school", "super"].includes(role) && (
+          <Button
+            variant="secondary"
+            icon="review"
+            onClick={() => ctx.go("review")}
+          >
+            Review submissions
+          </Button>
+        )}
+        <Button icon="plus" onClick={openCreate}>
           Create print batch
         </Button>
       </PageTitle>
@@ -1304,8 +1901,8 @@ export function PrintOrders({ ctx }) {
             <div>
               <h3>Handle printing in-house</h3>
               <p>
-                {data.ownPrinting
-                  ? "Your new batches are assigned to Northstar Print Co."
+                {(data.agentPrinting?.[ctx.agentId] ?? data.ownPrinting)
+                  ? "Your new batches are assigned to your print team."
                   : "New batches are fulfilled centrally by ID Studio."}
               </p>
             </div>
@@ -1314,9 +1911,15 @@ export function PrintOrders({ ctx }) {
             <input
               type="checkbox"
               role="switch"
-              checked={data.ownPrinting}
+              checked={data.agentPrinting?.[ctx.agentId] ?? data.ownPrinting}
               onChange={(e) =>
-                update((d) => ({ ...d, ownPrinting: e.target.checked }))
+                update((d) => ({
+                  ...d,
+                  agentPrinting: {
+                    ...d.agentPrinting,
+                    [ctx.agentId]: e.target.checked,
+                  },
+                }))
               }
             />
             <span>Own printing</span>
@@ -1325,6 +1928,7 @@ export function PrintOrders({ ctx }) {
       )}
       <div className="metric-grid print-metrics">
         {[
+          ["Submitted", "send"],
           ["In progress", "print"],
           ["Printed", "package"],
           ["Delivered", "truck"],
@@ -1363,9 +1967,18 @@ export function PrintOrders({ ctx }) {
             onChange={(e) => setBatchStatus(e.target.value)}
           >
             <option value="">All statuses</option>
-            {STAGES.map((s) => (
+            {[...STAGES, "Cancelled"].map((s) => (
               <option key={s}>{s}</option>
             ))}
+          </select>
+          <select
+            aria-label="Filter by who prints"
+            value={fulfilledBy}
+            onChange={(e) => setFulfilledBy(e.target.value)}
+          >
+            <option value="">All printers</option>
+            <option value="studio">ID Card Studio</option>
+            <option value="agent">Agent</option>
           </select>
         </div>
         <div className="table-wrap">
@@ -1409,24 +2022,26 @@ export function PrintOrders({ ctx }) {
                           setCarrier(b.carrier || "");
                         }}
                       />
-                      <IconButton
-                        icon="download"
-                        label={"Export batch " + b.id}
-                        onClick={() => {
-                          if (
-                            !batchRows(b).length &&
-                            !b.staffSnapshot?.length
-                          ) {
-                            notify(
-                              "This historical sample has no individual record export. Create a new batch to export its data.",
-                            );
-                            return;
-                          }
-                          exportBatch(b);
-                        }}
-                      />
+                      {canDownload && (
+                        <IconButton
+                          icon="download"
+                          label={"Export batch " + b.id}
+                          onClick={() => {
+                            if (
+                              !batchRows(b).length &&
+                              !b.staffSnapshot?.length
+                            ) {
+                              notify(
+                                "This historical sample has no individual record export. Create a new batch to export its data.",
+                              );
+                              return;
+                            }
+                            exportBatch(b);
+                          }}
+                        />
+                      )}
                       {(role === "super" ||
-                        ["In progress", "Cancelled"].includes(b.status)) && (
+                        ["Submitted", "Cancelled"].includes(b.status)) && (
                         <IconButton
                           icon="trash"
                           label={`Delete batch ${b.id}`}
@@ -1447,11 +2062,7 @@ export function PrintOrders({ ctx }) {
           />
         )}
       </Panel>
-      <OrderForms
-        key={school.id}
-        ctx={ctx}
-        batches={batches.filter((b) => b.school === school.id)}
-      />
+      <OrderForms key={school.id} ctx={ctx} />
       {removeBatch && (
         <Modal
           title={`Delete ${removeBatch.name}?`}
@@ -1506,9 +2117,10 @@ export function PrintOrders({ ctx }) {
                     ctx.setSchoolId(e.target.value);
                     setSelected([]);
                     setStaffIds([]);
+                    setConfirmBatch(false);
                   }}
                 >
-                  {availableSchools.map((s) => (
+                  {pickableSchools.map((s) => (
                     <option key={s.id} value={s.id}>
                       {s.name}
                     </option>
@@ -1523,90 +2135,117 @@ export function PrintOrders({ ctx }) {
                 placeholder="e.g. Class 6 · November collection"
               />
             </Field>
-            <div className="print-select-head">
-              <strong>Student cards</strong>
-              <Button
-                variant="text"
-                onClick={() =>
-                  setSelected(
-                    selected.length === students.length
-                      ? []
-                      : students.map((s) => s.id),
-                  )
-                }
-              >
-                {selected.length === students.length ? "Clear" : "Select all"}
-              </Button>
+            <div className="review-tabs" role="group" aria-label="Batch type">
+              {[
+                ["student", "Students"],
+                ["staff", "Staff"],
+              ].map(([value, label]) => (
+                <button
+                  type="button"
+                  key={value}
+                  aria-pressed={kind === value}
+                  className={kind === value ? "active" : ""}
+                  onClick={() => {
+                    setKind(value);
+                    setSelected([]);
+                    setStaffIds([]);
+                    setConfirmBatch(false);
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
-            {students.map((s) => (
-              <label className="print-select-row" key={s.id}>
+            <Callout icon="calendar" tone={remaining === 0 ? "amber" : "blue"}>
+              {used} of {allowed} {kind} print rounds used for {ctx.session}.{" "}
+              {remaining
+                ? `${remaining} remaining.`
+                : role === "super"
+                  ? "Super Admin can submit an extra round."
+                  : "Contact ID Card Studio to add a round."}
+            </Callout>
+            <div className="print-select-head">
+              <strong>
+                Approved {kind === "student" ? "students" : "staff"}
+              </strong>
+              {source.length > 0 && (
+                <Button
+                  variant="text"
+                  onClick={() => {
+                    setPicked(
+                      picked.length === source.length
+                        ? []
+                        : source.map((entry) => entry.id),
+                    );
+                    setConfirmBatch(false);
+                  }}
+                >
+                  {picked.length === source.length ? "Clear" : "Select all"}
+                </Button>
+              )}
+            </div>
+            {source.map((entry) => (
+              <label className="print-select-row" key={entry.id}>
                 <input
                   type="checkbox"
-                  checked={selected.includes(s.id)}
-                  onChange={() =>
-                    setSelected(
-                      selected.includes(s.id)
-                        ? selected.filter((id) => id !== s.id)
-                        : [...selected, s.id],
-                    )
-                  }
+                  checked={picked.includes(entry.id)}
+                  onChange={() => {
+                    setPicked(
+                      picked.includes(entry.id)
+                        ? picked.filter((id) => id !== entry.id)
+                        : [...picked, entry.id],
+                    );
+                    setConfirmBatch(false);
+                  }}
                 />
-                <Avatar name={s.name} />
+                <Avatar name={entry.name} photo={entry.photo} />
                 <span>
-                  <strong>{s.name}</strong>
+                  <strong>{entry.name}</strong>
                   <small>
-                    {s.admission} · Class {s.classNo} {s.section}
+                    {kind === "student"
+                      ? `${entry.admission || entry.srn || ""} · Class ${entry.classNo} ${entry.section || ""}`
+                      : entry.role}
                   </small>
                 </span>
                 <Badge>Approved</Badge>
               </label>
             ))}
-            {staff.length > 0 && (
-              <div className="print-select-head">
-                <strong>Staff cards</strong>
-              </div>
-            )}
-            {staff.map((s) => (
-              <label className="print-select-row" key={s.id}>
-                <input
-                  type="checkbox"
-                  checked={staffIds.includes(s.id)}
-                  onChange={() =>
-                    setStaffIds(
-                      staffIds.includes(s.id)
-                        ? staffIds.filter((id) => id !== s.id)
-                        : [...staffIds, s.id],
-                    )
-                  }
-                />
-                <Avatar name={s.name} />
-                <span>
-                  <strong>{s.name}</strong>
-                  <small>{s.role}</small>
-                </span>
-                <Badge>Approved</Badge>
-              </label>
-            ))}
-            {!students.length && !staff.length && (
+            {!source.length && (
               <Empty
-                title="No approved cards available"
-                text="Approve students in Review Submissions, or approve staff from the staff directory."
+                title={`No approved ${kind} cards`}
+                text={
+                  kind === "student"
+                    ? "Approve students in Review submissions."
+                    : "Approve staff in the staff directory."
+                }
               />
+            )}
+            {confirmBatch && (
+              <Callout icon="print">
+                <strong>
+                  Send {picked.length} {kind} cards?
+                </strong>{" "}
+                This saves a print snapshot and uses one round. A submitted
+                batch can be deleted until printing begins.
+              </Callout>
             )}
           </div>
           <div className="modal-actions">
-            <span className="muted">
-              {selected.length + staffIds.length} cards selected
-            </span>
-            <Button variant="secondary" onClick={() => setCreate(false)}>
-              Cancel
+            <span className="muted">{picked.length} cards selected</span>
+            <Button
+              variant="secondary"
+              onClick={() =>
+                confirmBatch ? setConfirmBatch(false) : setCreate(false)
+              }
+            >
+              {confirmBatch ? "Back" : "Cancel"}
             </Button>
             <Button
-              disabled={!selected.length && !staffIds.length}
+              disabled={!picked.length || blocked}
               icon="print"
-              onClick={submit}
+              onClick={() => (confirmBatch ? submit() : setConfirmBatch(true))}
             >
-              Submit for printing
+              {confirmBatch ? "Confirm and send to print" : "Review batch"}
             </Button>
           </div>
         </Modal>
@@ -1626,7 +2265,7 @@ export function PrintOrders({ ctx }) {
                   className={STAGES.indexOf(detail.status) >= i ? "done" : ""}
                 >
                   <span>
-                    <Icon name={["print", "package", "truck"][i]} />
+                    <Icon name={["send", "print", "package", "truck"][i]} />
                   </span>
                   <strong>{s}</strong>
                 </div>
@@ -1638,16 +2277,57 @@ export function PrintOrders({ ctx }) {
               <span>Design: {detail.design}</span>
             </div>
             <div className="button-row">
-              <Button
-                variant="secondary"
-                icon="download"
-                disabled={
-                  !batchRows(detail).length && !detail.staffSnapshot?.length
-                }
-                onClick={() => exportBatch(detail)}
-              >
-                Export batch CSV
-              </Button>
+              {canDownload &&
+                ["zip", "checklist"].map((format) => (
+                  <Button
+                    key={format}
+                    variant="secondary"
+                    icon="download"
+                    disabled={
+                      !batchRows(detail).length && !detail.staffSnapshot?.length
+                    }
+                    onClick={() =>
+                      exportStudents(
+                        [
+                          ...batchRows(detail),
+                          ...(detail.staffSnapshot || []).map((entry) => ({
+                            ...entry,
+                            classNo: entry.role,
+                            admission: entry.id,
+                            status: entry.printStatus,
+                          })),
+                        ],
+                        {
+                          ...data.schools.find(
+                            (entry) => entry.id === detail.school,
+                          ),
+                          short: detail.id,
+                        },
+                        [],
+                        format,
+                      ).catch(() =>
+                        notify("Could not prepare this download.", "error"),
+                      )
+                    }
+                  >
+                    {format === "zip"
+                      ? "Excel + photos (ZIP)"
+                      : "Proof checklist"}
+                  </Button>
+                ))}
+
+              {canDownload && (
+                <Button
+                  variant="secondary"
+                  icon="download"
+                  disabled={
+                    !batchRows(detail).length && !detail.staffSnapshot?.length
+                  }
+                  onClick={() => exportBatch(detail)}
+                >
+                  Export batch CSV
+                </Button>
+              )}
               <PDFProofButton
                 disabled={
                   !batchRows(detail).length && !detail.staffSnapshot?.length
@@ -1672,7 +2352,10 @@ export function PrintOrders({ ctx }) {
                 Create a new batch to try record exports and card proofs.
               </Callout>
             )}
-            {canProduce ? (
+            {canProduce &&
+            detail.status !== "Cancelled" &&
+            (role === "super" ||
+              !["ID Studio", "ID Card Studio"].includes(detail.owner)) ? (
               <>
                 <div className="rule" />
                 <h3>Production update</h3>

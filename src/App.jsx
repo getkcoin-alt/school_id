@@ -1,6 +1,13 @@
 import React, { useState, useEffect, useRef } from "react";
 import { ROLES, createSeed, STORAGE_KEY } from "./data.js";
-import { loadData, readPreviewData, saveData, uid } from "./lib.js";
+import {
+  loadData,
+  readPreviewData,
+  saveData,
+  uid,
+  sessionsFor,
+  currentSession,
+} from "./lib.js";
 import {
   Icon,
   IconButton,
@@ -12,6 +19,8 @@ import {
   Feedback,
   FeedbackContext,
 } from "./components.jsx";
+import PreviewAccess from "./PreviewAccess.jsx";
+import WorkspaceSearch from "./WorkspaceSearch.jsx";
 import Dashboard from "./pages/Dashboard.jsx";
 import Students from "./pages/Students.jsx";
 import { Invitations, ReviewQueue } from "./pages/Collection.jsx";
@@ -61,6 +70,7 @@ const menuItems = {
       "SCHOOL MANAGEMENT",
       ["staff", "user"],
       ["classes", "layers"],
+      ["sessions", "calendar"],
       ["promotion", "up"],
     ],
     [
@@ -69,6 +79,7 @@ const menuItems = {
       ["printing", "print"],
       ["photos", "image"],
     ],
+    ["MANAGEMENT", ["activity", "clock"]],
   ],
   super: [
     [
@@ -87,7 +98,12 @@ const menuItems = {
     ["MANAGEMENT", ["sessions", "calendar"], ["activity", "clock"]],
   ],
   premium: [
-    ["WORKSPACE", ["overview", "dashboard"], ["schools", "school"]],
+    [
+      "WORKSPACE",
+      ["overview", "dashboard"],
+      ["schools", "school"],
+      ["sessions", "calendar"],
+    ],
     [
       "PRODUCTION",
       ["photos", "fileUp"],
@@ -100,6 +116,7 @@ const menuItems = {
       "WORKSPACE",
       ["overview", "dashboard"],
       ["schools", "school"],
+      ["sessions", "calendar"],
       ["photos", "fileUp"],
       ["printing", "print"],
     ],
@@ -131,12 +148,15 @@ export default function App() {
   const [schoolId, setSchoolId] = useState(initial.get("school") || "SCH-001");
   const [screenRecord, setScreenRecord] = useState(initial.get("record"));
   const [recordVisit, setRecordVisit] = useState(0);
-  const [session, setSession] = useState("2026–27");
+  const [sessionView, setSessionView] = useState(() => ({
+    school: initial.get("school") || "SCH-001",
+    name: initial.get("session") || "",
+  }));
   const [toast, setToast] = useState(null),
     [openRoles, setOpenRoles] = useState(false),
     [notifications, setNotifications] = useState(false),
-    [globalSearch, setGlobalSearch] = useState(""),
     [searchOpen, setSearchOpen] = useState(false),
+    [accessOpen, setAccessOpen] = useState(initial.get("access") === "demo"),
     [reset, setReset] = useState(false);
   const toastTimer = useRef();
   const notify = (message, tone = "success") => {
@@ -149,13 +169,7 @@ export default function App() {
       const next = typeof fn === "function" ? fn(prev) : { ...prev, ...fn };
       return next;
     });
-  const log = (draft, text, type = "check") => ({
-    ...draft,
-    audit: [
-      { id: uid("EV"), text, type, time: new Date().toISOString() },
-      ...draft.audit,
-    ],
-  });
+
   useEffect(() => {
     if (!saveData(data))
       notify(
@@ -176,24 +190,18 @@ export default function App() {
     return () => window.removeEventListener("storage", sync);
   }, []);
   useEffect(() => {
-    const u = new URL(window.location.href);
-    u.searchParams.set("panel", role);
-    if (requestedAgent && ["regular", "premium"].includes(role))
-      u.searchParams.set("agent", requestedAgent);
-    else u.searchParams.delete("agent");
-    if (role !== "student") {
-      u.searchParams.set("page", page);
-      u.searchParams.set("school", schoolId);
-      if (["review", "students", "photos"].includes(page) && screenRecord)
-        u.searchParams.set("record", screenRecord);
-      else u.searchParams.delete("record");
-      u.searchParams.delete("student");
-      u.searchParams.delete("token");
-    }
-    window.history.replaceState({}, "", u);
-  }, [role, page, schoolId, screenRecord, requestedAgent]);
-  useEffect(() => {
     const listener = (e) => {
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        e.key.toLowerCase() === "k" &&
+        !document.querySelector("dialog[open]")
+      ) {
+        e.preventDefault();
+        if (
+          new URLSearchParams(window.location.search).get("panel") !== "student"
+        )
+          setSearchOpen(true);
+      }
       if (e.key === "Escape") {
         setOpenRoles(false);
       }
@@ -219,6 +227,48 @@ export default function App() {
     : data.schools;
   const school = availableSchools.find((s) => s.id === schoolId) ||
     availableSchools[0] || { id: "", name: "No school assigned" };
+  const sessions = sessionsFor(data, school.id);
+  const session =
+    sessionView.school === school.id &&
+    sessions.some((item) => item.name === sessionView.name)
+      ? sessionView.name
+      : currentSession(data, school.id);
+  const setSession = (name, targetSchool = school.id) =>
+    setSessionView({ school: targetSchool, name });
+  const changeSchool = (id) => {
+    setSchoolId(id);
+    setSessionView({ school: id, name: "" });
+  };
+  useEffect(() => {
+    const u = new URL(window.location.href);
+    u.searchParams.set("panel", role);
+    if (requestedAgent && ["regular", "premium"].includes(role))
+      u.searchParams.set("agent", requestedAgent);
+    else u.searchParams.delete("agent");
+    if (role !== "student") {
+      u.searchParams.set("session", session);
+      u.searchParams.set("page", page);
+      u.searchParams.set("school", schoolId);
+      if (
+        [
+          "review",
+          "students",
+          "photos",
+          "staff",
+          "schools",
+          "agents",
+          "printing",
+        ].includes(page) &&
+        screenRecord
+      )
+        u.searchParams.set("record", screenRecord);
+      else u.searchParams.delete("record");
+      u.searchParams.delete("student");
+      u.searchParams.delete("token");
+      if (!accessOpen) u.searchParams.delete("access");
+    }
+    window.history.replaceState({}, "", u);
+  }, [role, page, schoolId, screenRecord, requestedAgent, session, accessOpen]);
   const go = (target, record = null) => {
     if (phoneView && (target !== page || record !== screenRecord))
       window.history.pushState({}, "", window.location.href);
@@ -236,7 +286,8 @@ export default function App() {
     setPage("overview");
     setScreenRecord(null);
     setOpenRoles(false);
-    setSchoolId(id === "regular" ? "SCH-003" : "SCH-001");
+    setAccessOpen(false);
+    changeSchool(id === "regular" ? "SCH-003" : "SCH-001");
     if (id === "student") {
       const u = new URL(window.location.href);
       u.searchParams.set("student", "ST-0019");
@@ -253,6 +304,10 @@ export default function App() {
       setPage(pageNames[screen] ? screen : "overview");
       setRequestedAgent(params.get("agent"));
       setSchoolId(params.get("school") || "SCH-001");
+      setSessionView({
+        school: params.get("school") || "SCH-001",
+        name: params.get("session") || "",
+      });
       setScreenRecord(params.get("record"));
       setOpenRoles(false);
       setNotifications(false);
@@ -291,19 +346,39 @@ export default function App() {
             phone: "9876500999",
           }
         : agent || { name: "Agent", email: "", phone: "" });
+  const log = (draft, text, type = "check") => ({
+    ...draft,
+    audit: [
+      {
+        id: uid("EV"),
+        text,
+        type,
+        time: new Date().toISOString(),
+        school: school.id,
+        actor: userProfile.name,
+      },
+      ...draft.audit,
+    ],
+  });
   const ctx = {
-    data,
+    data: {
+      ...data,
+      classes: data.schoolClasses?.[school.id] || data.classes,
+      sections: data.schoolSections?.[school.id] || data.sections,
+      staffRoles: data.schoolStaffRoles?.[school.id] || data.staffRoles,
+    },
     update,
     role,
     school,
     schoolId: school.id,
     availableSchools,
     session,
+    sessions,
     setSession,
     go,
     notify,
     log,
-    setSchoolId,
+    setSchoolId: changeSchool,
     userProfile,
     profileKey,
     agentId: agent?.id,
@@ -311,6 +386,7 @@ export default function App() {
     reviewRecord: page === "review" ? screenRecord : null,
     studentRecord: page === "students" ? screenRecord : null,
     photoRecord: page === "photos" ? screenRecord : null,
+    record: screenRecord,
     design: data.schoolDesigns?.[school.id] || data.design,
     schoolStudents: data.students.filter(
       (s) => s.school === school.id && s.session === session,
@@ -361,8 +437,10 @@ export default function App() {
   const openAlert = (item) => {
     markRead([item.id]);
     setSchoolId(item.alertSchool);
-    if (item.student) setSession(item.student.session);
-    if (item.student?.status === "Submitted for print") go("printing");
+    if (item.student) setSession(item.student.session, item.alertSchool);
+    if (item.batch) go("printing", item.batch);
+    else if (item.student?.status === "Submitted for print")
+      go("printing", item.student.batch);
     else {
       const pdf =
         item.target === "photos" &&
@@ -450,22 +528,39 @@ export default function App() {
       );
       break;
     case "schools":
-      content = <Schools ctx={ctx} />;
+      content = (
+        <Schools
+          key={`-${screenRecord || "Schools"}-${recordVisit}`}
+          ctx={ctx}
+        />
+      );
       break;
     case "agents":
-      content = <Agents ctx={ctx} />;
+      content = (
+        <Agents key={`-${screenRecord || "Agents"}-${recordVisit}`} ctx={ctx} />
+      );
       break;
     case "staff":
-      content = <Staff ctx={ctx} />;
+      content = (
+        <Staff
+          key={`${school.id}-${screenRecord || "Staff"}-${recordVisit}`}
+          ctx={ctx}
+        />
+      );
       break;
     case "classes":
       content = <Classes ctx={ctx} />;
       break;
     case "promotion":
-      content = <Promotion ctx={ctx} />;
+      content = <Promotion key={`${school.id}-${session}`} ctx={ctx} />;
       break;
     case "sessions":
-      content = <Sessions ctx={ctx} />;
+      content = (
+        <Sessions
+          key={`${school.id}-${screenRecord || "Sessions"}-${recordVisit}`}
+          ctx={ctx}
+        />
+      );
       break;
     case "settings":
       content = (
@@ -490,7 +585,12 @@ export default function App() {
       content = <Designs ctx={ctx} />;
       break;
     case "printing":
-      content = <PrintOrders ctx={ctx} />;
+      content = (
+        <PrintOrders
+          key={`-${screenRecord || "PrintOrders"}-${recordVisit}`}
+          ctx={ctx}
+        />
+      );
       break;
     default:
       content = phoneView ? <PhoneHome ctx={ctx} /> : <Dashboard ctx={ctx} />;
@@ -498,7 +598,7 @@ export default function App() {
   if (
     isAgent &&
     !school.id &&
-    ["photos", "printing", "designs"].includes(page)
+    ["photos", "printing", "designs", "sessions"].includes(page)
   ) {
     content = (
       <Empty
@@ -508,20 +608,11 @@ export default function App() {
       />
     );
   }
-  const searchResults = globalSearch.trim()
-    ? data.students
-        .filter(
-          (s) =>
-            (role === "super" ||
-              (role === "school"
-                ? s.school === school.id
-                : availableSchools.some((sch) => sch.id === s.school))) &&
-            `${s.name} ${s.admission}`
-              .toLowerCase()
-              .includes(globalSearch.toLowerCase()),
-        )
-        .slice(0, 5)
-    : [];
+  const searchablePages = [
+    ...(menuItems[role] || []).flatMap(([, ...items]) => items),
+    ["settings", "settings"],
+    ["guide", "help"],
+  ].map(([key, icon]) => [key, pageNames[key], icon]);
   const workspace = (
     <div
       className={
@@ -671,8 +762,8 @@ export default function App() {
                 <span className="header-separator" />
                 <button
                   className="icon-btn"
-                  title="Search students"
-                  aria-label="Search students"
+                  title="Search workspace (Ctrl/⌘ + K)"
+                  aria-label="Search workspace"
                   onClick={() => setSearchOpen(true)}
                 >
                   <Icon name="search" />
@@ -704,7 +795,7 @@ export default function App() {
                     value={session}
                     onChange={(e) => setSession(e.target.value)}
                   >
-                    {data.sessions.map((s) => (
+                    {sessions.map((s) => (
                       <option key={s.name}>{s.name}</option>
                     ))}
                   </select>
@@ -745,6 +836,18 @@ export default function App() {
                 <Icon name={role === item.id ? "check" : "chevron"} size={17} />
               </button>
             ))}
+            {role !== "student" && (
+              <Button
+                variant="secondary"
+                icon="lock"
+                onClick={() => {
+                  setOpenRoles(false);
+                  setAccessOpen(true);
+                }}
+              >
+                Preview sign-in and account setup
+              </Button>
+            )}
           </div>
         </Modal>
       )}
@@ -786,50 +889,18 @@ export default function App() {
           </div>
         </Modal>
       )}
+      {accessOpen && (
+        <PreviewAccess
+          onClose={() => setAccessOpen(false)}
+          onEnter={switchRole}
+        />
+      )}
       {searchOpen && (
-        <Modal
-          title="Find a student"
-          placement="top"
-          subtitle="Search by name or admission number."
+        <WorkspaceSearch
+          ctx={ctx}
+          pages={searchablePages}
           onClose={() => setSearchOpen(false)}
-        >
-          <div className="modal-body">
-            <div className="search-box">
-              <Icon name="search" />
-              <input
-                data-initial-focus
-                value={globalSearch}
-                onChange={(e) => setGlobalSearch(e.target.value)}
-                placeholder="Try Aarav or 2026001"
-                aria-label="Global student search"
-              />
-            </div>
-            {searchResults.map((s) => (
-              <button
-                className="search-result"
-                key={s.id}
-                onClick={() => {
-                  setSchoolId(s.school);
-                  setSession(s.session);
-                  go("students", s.id);
-                  setSearchOpen(false);
-                }}
-              >
-                <Avatar name={s.name} />
-                <div>
-                  <strong>{s.name}</strong>
-                  <small>
-                    {s.admission} · Class {s.classNo} {s.section}
-                  </small>
-                </div>
-                <Badge>{s.status}</Badge>
-              </button>
-            ))}
-            {globalSearch && !searchResults.length && (
-              <p className="muted padded">No matching students.</p>
-            )}
-          </div>
-        </Modal>
+        />
       )}
       {reset && (
         <Modal

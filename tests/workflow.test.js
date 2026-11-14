@@ -11,6 +11,12 @@ import {
   isNotSubmitted,
   parentName,
   readPreviewData,
+  schoolFields,
+  schoolExtras,
+  printRounds,
+  sessionsFor,
+  currentSession,
+  sheetDate,
 } from "../src/lib.js";
 test("the preview has no Teacher panel and preserves the two agent tiers", () => {
   assert.deepEqual(
@@ -155,6 +161,8 @@ test("parent prefixes support the GitLab spreadsheet and old preview settings", 
   assert.deepEqual(fieldScope["SCH-001"], [
     "father",
     "mother",
+    "photoNo",
+    "srn",
     "fatherPrefix",
     "motherPrefix",
   ]);
@@ -194,4 +202,100 @@ test("parent prefixes support the GitLab spreadsheet and old preview settings", 
   );
   assert.equal(parentName({ mother: "Parent Two" }, "mother"), "Parent Two");
   assert.ok(validateStudent({ fatherPrefix: "Mr." }, FIELDS).father);
+});
+
+test("official spreadsheet keeps photo numbers and SRN, parses dates and skips duplicate children", () => {
+  const rows = [
+    {
+      NAME: "Example Child",
+      FATHER: "Example Parent",
+      DOB: "12-10-2015",
+      CLASS: "6",
+      PHOTO: "dsc_0101.jpg",
+      SRN: "00024",
+    },
+    {
+      NAME: "Example Child",
+      FATHER: "Example Parent",
+      DOB: "2015-10-12",
+      CLASS: "6",
+      ADMNO: "NEW",
+    },
+    { NAME: "Second Child", DOB: 42100, CLASS: "7", SECTION: "b" },
+  ];
+  const report = parseImport(rows, "SCH-001", []);
+  assert.equal(report.invalid, 0);
+  assert.equal(report.duplicates, 1);
+  assert.equal(report.students.length, 2);
+  assert.equal(report.students[0].photoNo, "DSC_0101");
+  assert.equal(report.students[0].srn, "00024");
+  assert.equal(report.students[0].dob, "2015-10-12");
+  assert.equal(report.students[1].dob, "2015-04-06");
+  assert.equal(report.students[1].section, "B");
+  assert.equal(sheetDate("31-02-2015"), "");
+});
+
+test("each school's sessions and print rounds are independent by year and card type", () => {
+  const data = createSeed();
+  const school = data.schools[0];
+  data.schoolSessions = { [school.id]: [{ name: "2027–28", active: true }] };
+  assert.equal(currentSession(data, school.id), "2027–28");
+  assert.equal(currentSession(data, data.schools[1].id), "2026–27");
+  assert.equal(sessionsFor(data, school.id).length, 1);
+  const batches = [
+    {
+      school: school.id,
+      session: "2027–28",
+      kind: "student",
+      status: "Submitted",
+    },
+    {
+      school: school.id,
+      session: "2027–28",
+      kind: "student",
+      status: "Cancelled",
+    },
+    { school: school.id, session: "2027–28", kind: "staff", status: "Printed" },
+    {
+      school: school.id,
+      session: "2026–27",
+      kind: "student",
+      status: "Printed",
+    },
+  ];
+  assert.deepEqual(printRounds(batches, school, "2027–28", "student"), {
+    allowed: school.studentRounds,
+    used: 1,
+    remaining: school.studentRounds - 1,
+  });
+  assert.equal(printRounds(batches, school, "2027–28", "staff").used, 1);
+});
+
+test("school field rules and required choices apply before a card can be approved", () => {
+  const data = createSeed();
+  const school = data.schools[0];
+  data.fieldRequired = { [school.id]: [] };
+  data.customFields = [
+    {
+      id: "house",
+      name: "House",
+      school: school.id,
+      required: true,
+      type: "select",
+      options: ["Blue", "Red"],
+    },
+  ];
+  const fields = schoolFields(data, school.id);
+  const extras = schoolExtras(data, school.id);
+  const record = {
+    ...data.students[0],
+    father: "",
+    custom: { house: "Green" },
+  };
+  assert.equal(fields.find(([key]) => key === "father")[3], false);
+  assert.ok(approvalError(record, fields, extras));
+  assert.equal(
+    approvalError({ ...record, custom: { house: "Blue" } }, fields, extras),
+    "",
+  );
 });

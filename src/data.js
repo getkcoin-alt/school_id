@@ -36,6 +36,8 @@ export const PARENT_PREFIXES = {
   motherPrefix: ["Mrs.", "Smt.", "Dr.", "Ms.", "Late Smt."],
 };
 export const FIELDS = [
+  ["photoNo", "Photo No.", "text", false],
+  ["srn", "SRN", "text", false],
   ["name", "Full name", "text", true],
   ["admission", "Admission number", "text", true],
   ["classNo", "Class", "class", true],
@@ -281,14 +283,12 @@ export function createSeed() {
         count: 6,
         studentIds: [],
         staffIds: [],
-        snapshot: students
-          .slice(0, 6)
-          .map((s) => ({
-            ...s,
-            id: "HIST-" + s.id,
-            status: "Submitted for print",
-            session: "2025–26",
-          })),
+        snapshot: students.slice(0, 6).map((s) => ({
+          ...s,
+          id: "HIST-" + s.id,
+          status: "Submitted for print",
+          session: "2025–26",
+        })),
         status: "In progress",
         date: "2026-11-04",
         owner: "ID Studio",
@@ -303,14 +303,12 @@ export function createSeed() {
         count: 24,
         studentIds: [],
         staffIds: [],
-        snapshot: students
-          .slice(24, 48)
-          .map((s) => ({
-            ...s,
-            id: "HIST-" + s.id,
-            status: "Submitted for print",
-            session: "2025–26",
-          })),
+        snapshot: students.slice(24, 48).map((s) => ({
+          ...s,
+          id: "HIST-" + s.id,
+          status: "Submitted for print",
+          session: "2025–26",
+        })),
         status: "Delivered",
         date: "2026-10-26",
         owner: "Northstar Print Co.",

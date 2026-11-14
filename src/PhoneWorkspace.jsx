@@ -68,7 +68,7 @@ export default function PhoneWorkspace({
         </button>
         <button
           className="phone-icon"
-          aria-label="Search students"
+          aria-label="Search workspace"
           aria-haspopup="dialog"
           onClick={onSearch}
         >
@@ -126,7 +126,7 @@ export default function PhoneWorkspace({
                 value={ctx.session}
                 onChange={(e) => ctx.setSession(e.target.value)}
               >
-                {data.sessions.map(({ name }) => (
+                {ctx.sessions.map(({ name }) => (
                   <option key={name}>{name}</option>
                 ))}
               </select>
@@ -230,7 +230,7 @@ export function PhoneHome({ ctx }) {
             value={session}
             onChange={(e) => setSession(e.target.value)}
           >
-            {data.sessions.map(({ name }) => (
+            {ctx.sessions.map(({ name }) => (
               <option key={name}>{name}</option>
             ))}
           </select>

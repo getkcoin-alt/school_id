@@ -286,6 +286,34 @@ export function ParentPrefixSelect({ type, value = "", onChange }) {
   );
 }
 
+export function ExtraField({ field, value = "", error, onChange }) {
+  return (
+    <Field label={field.name} required={field.required} error={error}>
+      {field.type === "select" ? (
+        <select
+          value={value}
+          required={field.required}
+          onChange={(e) => onChange(e.target.value)}
+        >
+          <option value="">Choose an option</option>
+          {value && !field.options.includes(value) && (
+            <option value={value}>{value} (previous)</option>
+          )}
+          {field.options.map((option) => (
+            <option key={option}>{option}</option>
+          ))}
+        </select>
+      ) : (
+        <input
+          value={value}
+          required={field.required}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      )}
+    </Field>
+  );
+}
+
 export function SearchBox({ value, onChange, placeholder = "Search…" }) {
   return (
     <div className="search-box">
@@ -481,19 +509,24 @@ export function CardPreview({
             <span className="id-type">STUDENT IDENTITY</span>
             <strong>{student?.name || "Aarav Sharma"}</strong>
             <span>
-              Class {student?.classNo || "6"} · {student?.section || "A"} <i />{" "}
+              Class {student?.classNo || "6"}
+              {student?.section ? ` · ${student.section}` : ""} <i />{" "}
               {student?.session || "2026–27"}
             </span>
           </div>
           <div className="id-card-data">
-            <div>
-              <span>ADMISSION NO.</span>
-              <strong>{student?.admission || "2026001"}</strong>
-            </div>
-            <div>
-              <span>BLOOD GROUP</span>
-              <strong>{student?.blood || "O+"}</strong>
-            </div>
+            {(!student || student.admission) && (
+              <div>
+                <span>ADMISSION NO.</span>
+                <strong>{student?.admission || "2026001"}</strong>
+              </div>
+            )}
+            {(!student || student.blood) && (
+              <div>
+                <span>BLOOD GROUP</span>
+                <strong>{student?.blood || "O+"}</strong>
+              </div>
+            )}
           </div>
           <div className="barcode" />
           <div className="id-card-footer">

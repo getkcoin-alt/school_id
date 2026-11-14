@@ -19,10 +19,12 @@ import {
   uid,
   fmtDate,
   approvalError,
+  schoolFields,
+  cardRecord,
+  schoolExtras,
   approvedStudent,
   isNotSubmitted,
 } from "../lib.js";
-import { FIELDS } from "../data.js";
 import { StudentEditor } from "./Students.jsx";
 export function Invitations({ ctx }) {
   const { schoolStudents, data, update, notify, go, school, log } = ctx;
@@ -478,10 +480,8 @@ export function ReviewQueue({ ctx }) {
     ctx.phoneView && list.some((student) => student.id === chosen);
   const approve = () => {
     if (!current || !canReview) return;
-    const fields = FIELDS.filter((f) =>
-      (data.fieldScope[school.id] || data.enabledFields).includes(f[0]),
-    );
-    const error = approvalError(current, fields);
+    const fields = schoolFields(data, school.id);
+    const error = approvalError(current, fields, schoolExtras(data, school.id));
     if (error) {
       notify(error, "error");
       return;
@@ -636,7 +636,7 @@ export function ReviewQueue({ ctx }) {
               <div className="review-content">
                 <div className="review-card">
                   <CardPreview
-                    student={current}
+                    student={cardRecord(data, school.id, current)}
                     school={school}
                     design={ctx.design}
                   />
@@ -675,27 +675,20 @@ export function ReviewQueue({ ctx }) {
                     </Badge>
                   </div>
                   <dl className="details-list">
-                    {FIELDS.filter(
-                      ([key]) =>
-                        (
-                          data.fieldScope[school.id] || data.enabledFields
-                        ).includes(key) && current[key],
-                    ).map(([key, label]) => (
-                      <div key={key}>
-                        <dt>{label}</dt>
-                        <dd>{current[key]}</dd>
-                      </div>
-                    ))}
-                    {data.customFields
-                      .filter(
-                        (f) => f.school === school.id && f.audience !== "staff",
-                      )
-                      .map((f) => (
-                        <div key={f.id}>
-                          <dt>{f.name}</dt>
-                          <dd>{current.custom?.[f.id] || "—"}</dd>
+                    {schoolFields(data, school.id)
+                      .filter(([key]) => current[key])
+                      .map(([key, label]) => (
+                        <div key={key}>
+                          <dt>{label}</dt>
+                          <dd>{current[key]}</dd>
                         </div>
                       ))}
+                    {schoolExtras(data, school.id).map((f) => (
+                      <div key={f.id}>
+                        <dt>{f.name}</dt>
+                        <dd>{current.custom?.[f.id] || "—"}</dd>
+                      </div>
+                    ))}
                   </dl>
                 </div>
               </div>

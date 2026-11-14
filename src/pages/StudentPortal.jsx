@@ -1,17 +1,26 @@
 import React, { useState, useRef, useEffect } from "react";
-import { FIELDS, personIcon } from "../data.js";
+import { personIcon } from "../data.js";
 import {
   Icon,
   Button,
   Panel,
   Field,
   ParentPrefixSelect,
+  ExtraField,
   Callout,
   Steps,
   CardPreview,
   Badge,
 } from "../components.jsx";
-import { validateStudent } from "../lib.js";
+import {
+  schoolFields,
+  cardRecord,
+  schoolExtras,
+  validateStudent,
+  validateExtras,
+  studentPhoto,
+  validPhoto,
+} from "../lib.js";
 export default function StudentPortal({ ctx }) {
   const { data, update, notify, log, phoneView } = ctx;
   const workspacePath = phoneView ? "/app" : "/";
@@ -26,6 +35,7 @@ export default function StudentPortal({ ctx }) {
   const [step, setStep] = useState(-1),
     [code, setCode] = useState(""),
     [codeError, setCodeError] = useState(""),
+    [otpRequested, setOtpRequested] = useState(false),
     [errors, setErrors] = useState({}),
     [stream, setStream] = useState(null),
     [cameraError, setCameraError] = useState(""),
@@ -79,8 +89,10 @@ export default function StudentPortal({ ctx }) {
       </div>
     );
   const design = data.schoolDesigns?.[school.id] || data.design;
-  const keys = data.fieldScope[school.id] || data.enabledFields;
-  const fields = FIELDS.filter((f) => keys.includes(f[0]));
+  const fields = schoolFields(data, school.id).filter(
+    ([key]) => key !== "photoNo",
+  );
+  const extras = schoolExtras(data, school.id);
   const change = (key, val) => {
     setDraft((d) => ({ ...d, [key]: val }));
     setErrors((e) => ({ ...e, [key]: null }));
@@ -152,7 +164,10 @@ export default function StudentPortal({ ctx }) {
     stop();
   };
   const next = () => {
-    const e = validateStudent(draft, fields);
+    const e = {
+      ...validateStudent(draft, fields),
+      ...validateExtras(draft, extras),
+    };
     if (Object.keys(e).length) {
       setErrors(e);
       notify("Please check the highlighted details.", "error");
@@ -168,10 +183,15 @@ export default function StudentPortal({ ctx }) {
     if (
       !confirmed ||
       !draft.photo ||
-      !["Live camera", "Demo capture"].includes(draft.photoSource)
+      !["Live camera", "Demo capture", "Student upload"].includes(
+        draft.photoSource,
+      )
     )
       return;
-    const errors = validateStudent(draft, fields);
+    const errors = {
+      ...validateStudent(draft, fields),
+      ...validateExtras(draft, extras),
+    };
     if (Object.keys(errors).length) {
       setErrors(errors);
       setStep(0);
@@ -287,48 +307,74 @@ export default function StudentPortal({ ctx }) {
                 A few details, a clear photo, and you’re done. First, let’s
                 check your invitation.
               </p>
-              <div className="invitation-address">
-                <Icon name="lock" size={17} />
-                <div>
-                  <span>Invitation email</span>
-                  <strong>{draft.email}</strong>
-                </div>
-              </div>
-              <Field
-                label="Enter the 6-digit verification code"
-                error={codeError}
-              >
-                <input
-                  className="otp-input"
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  maxLength="6"
-                  value={code}
-                  onChange={(e) => {
-                    setCode(e.target.value.replace(/\D/g, ""));
-                    setCodeError("");
-                  }}
-                  placeholder="• • • • • •"
-                />
-              </Field>
-              <Button
-                icon="arrow"
-                onClick={() => {
-                  if (code === "246810") {
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const expected = original.email
+                    ? "246810"
+                    : String(original.admission || "");
+                  if (
+                    expected &&
+                    code.trim().toLowerCase() === expected.toLowerCase()
+                  )
                     setStep(0);
-                  } else
+                  else
                     setCodeError(
-                      "For this preview, enter the demo code 246810.",
+                      original.email
+                        ? "For this demo, enter 246810."
+                        : "Use the admission number in your school record.",
                     );
                 }}
               >
-                Verify & continue
-              </Button>
-              <Callout icon="play">
-                <strong>Try the full experience.</strong> This is a demo
-                verification step. Use code <b>246810</b>. No code has been sent
-                and this does not authenticate your identity.
-              </Callout>
+                {original.email && (
+                  <div className="invitation-address">
+                    <Icon name="lock" size={17} />
+                    <div>
+                      <span>Invitation email</span>
+                      <strong>{original.email}</strong>
+                    </div>
+                  </div>
+                )}
+                {original.email && !otpRequested ? (
+                  <Button icon="email" onClick={() => setOtpRequested(true)}>
+                    Request demo email code
+                  </Button>
+                ) : (
+                  <>
+                    <Field
+                      label={
+                        original.email
+                          ? "Enter the 6-digit verification code"
+                          : "Your admission number"
+                      }
+                      error={codeError}
+                    >
+                      <input
+                        required
+                        value={code}
+                        inputMode={original.email ? "numeric" : "text"}
+                        maxLength={original.email ? 6 : 60}
+                        onChange={(e) => {
+                          setCode(
+                            original.email
+                              ? e.target.value.replace(/\D/g, "")
+                              : e.target.value,
+                          );
+                          setCodeError("");
+                        }}
+                      />
+                    </Field>
+                    <Button icon="arrow" type="submit">
+                      Verify &amp; continue
+                    </Button>
+                  </>
+                )}
+                <Callout icon="play">
+                  {original.email
+                    ? "Demo code 246810. This preview simulates email delivery."
+                    : "Enter the admission number provided by your school for this demo record."}
+                </Callout>
+              </form>
               <div className="student-help">
                 <Icon name="clock" size={15} />
                 About 3 minutes · Your school reviews the final details
@@ -394,9 +440,10 @@ export default function StudentPortal({ ctx }) {
                               Choose {label.toLowerCase()}
                             </option>
                             {(type === "class"
-                              ? data.classes
+                              ? data.schoolClasses?.[school.id] || data.classes
                               : type === "section"
-                                ? data.sections
+                                ? data.schoolSections?.[school.id] ||
+                                  data.sections
                                 : type === "gender"
                                   ? [
                                       "Male",
@@ -427,23 +474,20 @@ export default function StudentPortal({ ctx }) {
                         )}
                       </Field>
                     ))}
-                    {data.customFields
-                      .filter(
-                        (f) => f.school === school.id && f.audience !== "staff",
-                      )
-                      .map((f) => (
-                        <Field key={f.id} label={f.name}>
-                          <input
-                            value={draft.custom?.[f.id] || ""}
-                            onChange={(e) =>
-                              setDraft((d) => ({
-                                ...d,
-                                custom: { ...d.custom, [f.id]: e.target.value },
-                              }))
-                            }
-                          />
-                        </Field>
-                      ))}
+                    {extras.map((field) => (
+                      <ExtraField
+                        key={field.id}
+                        field={field}
+                        value={draft.custom?.[field.id]}
+                        error={errors[`extra:${field.id}`]}
+                        onChange={(value) =>
+                          setDraft((record) => ({
+                            ...record,
+                            custom: { ...record.custom, [field.id]: value },
+                          }))
+                        }
+                      />
+                    ))}
                   </div>
                 )}
                 {step === 1 && (
@@ -481,9 +525,11 @@ export default function StudentPortal({ ctx }) {
                           </span>
                         </>
                       ) : draft.photo &&
-                        ["Live camera", "Demo capture"].includes(
-                          draft.photoSource,
-                        ) ? (
+                        [
+                          "Live camera",
+                          "Demo capture",
+                          "Student upload",
+                        ].includes(draft.photoSource) ? (
                         <>
                           <img
                             src={draft.photo}
@@ -498,7 +544,9 @@ export default function StudentPortal({ ctx }) {
                           >
                             {draft.photoSource === "Demo capture"
                               ? "Sample photo · demo only"
-                              : "Live camera photo"}
+                              : draft.photoSource === "Student upload"
+                                ? "Uploaded photo"
+                                : "Live camera photo"}
                           </Badge>
                         </>
                       ) : (
@@ -551,6 +599,38 @@ export default function StudentPortal({ ctx }) {
                             : "Open camera"}
                         </Button>
                       )}
+                      <label className="btn secondary upload-label">
+                        <Icon name="upload" /> <span>Upload a photo</span>
+                        <input
+                          type="file"
+                          accept="image/jpeg,image/png,image/webp"
+                          disabled={!consent}
+                          onChange={async (e) => {
+                            const file = e.target.files?.[0];
+                            if (!file) return;
+                            e.target.value = "";
+                            if (!validPhoto(file)) {
+                              setCameraError(
+                                "Choose a JPG, PNG, or WebP under 15 MB.",
+                              );
+                              return;
+                            }
+                            try {
+                              const photo = await studentPhoto(file);
+                              stop();
+                              setCameraError("");
+                              setDraft((d) => ({
+                                ...d,
+                                photo,
+                                photoSource: "Student upload",
+                                captureAt: null,
+                              }));
+                            } catch {
+                              setCameraError("Could not open this photo.");
+                            }
+                          }}
+                        />
+                      </label>
                       <Button
                         variant="text"
                         disabled={!consent}
@@ -578,7 +658,7 @@ export default function StudentPortal({ ctx }) {
                   <>
                     <div className="final-card-preview">
                       <CardPreview
-                        student={draft}
+                        student={cardRecord(data, school.id, draft)}
                         school={school}
                         design={design}
                       />
@@ -636,9 +716,11 @@ export default function StudentPortal({ ctx }) {
                       icon="arrow"
                       disabled={
                         !draft.photo ||
-                        !["Live camera", "Demo capture"].includes(
-                          draft.photoSource,
-                        )
+                        ![
+                          "Live camera",
+                          "Demo capture",
+                          "Student upload",
+                        ].includes(draft.photoSource)
                       }
                       onClick={() => {
                         stop();
@@ -666,7 +748,11 @@ export default function StudentPortal({ ctx }) {
               Your school story.
             </h2>
             {step !== 2 && (
-              <CardPreview student={draft} school={school} design={design} />
+              <CardPreview
+                student={cardRecord(data, school.id, draft)}
+                school={school}
+                design={design}
+              />
             )}
             <div className="student-assurance">
               <span>
