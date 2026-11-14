@@ -28,6 +28,8 @@ export default function PhoneWorkspace({
   onRoles,
   onSearch,
   onNotifications,
+  onSwitchAccount,
+  onLogout,
   hasUnread,
   reviewCount,
   children,
@@ -149,6 +151,29 @@ export default function PhoneWorkspace({
                     <Icon name="chevron" size={16} />
                   </button>
                 ))}
+                {group === "Account" && (
+                  <>
+                    <button
+                      className="phone-menu-row"
+                      onClick={() => {
+                        close();
+                        onSwitchAccount();
+                      }}
+                    >
+                      <Icon name="user" size={20} />
+                      <span>Switch account</span>
+                      <Icon name="chevron" size={16} />
+                    </button>
+                    <button
+                      className="phone-menu-row phone-logout"
+                      onClick={onLogout}
+                    >
+                      <Icon name="lock" size={20} />
+                      <span>Log out</span>
+                      <Icon name="chevron" size={16} />
+                    </button>
+                  </>
+                )}
               </section>
             ))}
           </div>

@@ -19,6 +19,48 @@
 .phone-workspace {
   padding-bottom: var(--phone-bottom);
 }
+.phone-access {
+  padding: max(32px, env(safe-area-inset-top)) 20px
+    max(24px, env(safe-area-inset-bottom));
+}
+.phone-access-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 0 0 24px;
+}
+.phone-access-header h1 {
+  margin: 0;
+  font-size: clamp(22px, 6vw, 29px);
+  letter-spacing: -0.04em;
+}
+.phone-access-header p {
+  margin: 4px 0 0;
+  color: var(--phone-muted);
+}
+.phone-access form {
+  background: #fff;
+  border: 1px solid var(--phone-border);
+  border-radius: 20px;
+}
+.phone-access .modal-body {
+  padding: 20px;
+}
+.phone-access .field input,
+.phone-access .field select {
+  min-height: 48px;
+  font-size: 16px;
+}
+.phone-access .modal-actions {
+  flex-wrap: wrap;
+}
+.phone-access .modal-actions .btn {
+  flex: 1;
+  min-height: 48px;
+}
+.phone-menu-row.phone-logout {
+  color: var(--phone-accent);
+}
 .phone-workspace :focus-visible,
 .student-app :focus-visible {
   outline: 2px solid #c43f48;

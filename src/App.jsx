@@ -39,6 +39,16 @@ import { PrintOrders, Designs, PhotoUploads } from "./pages/Production.jsx";
 import StudentPortal from "./pages/StudentPortal.jsx";
 import { clearFiles } from "./files.js";
 import PhoneWorkspace, { PhoneHome } from "./PhoneWorkspace.jsx";
+const DEMO_SESSION_KEY = "id-studio-demo-account";
+const demoRole = (id) =>
+  ROLES.some((entry) => entry.id === id && id !== "student") ? id : null;
+function readDemoAccount() {
+  try {
+    return demoRole(window.localStorage.getItem(DEMO_SESSION_KEY));
+  } catch {
+    return null;
+  }
+}
 const pageNames = {
   overview: "Overview",
   students: "Students",
@@ -129,6 +139,9 @@ export default function App() {
     () => window.matchMedia("(max-width: 760px)").matches,
   );
   const phoneView = appRoute || narrowScreen;
+  const [demoAccount, setDemoAccount] = useState(readDemoAccount);
+  const [signedOut, setSignedOut] = useState(false);
+  const [accessRole, setAccessRole] = useState(null);
   useEffect(() => {
     const media = window.matchMedia("(max-width: 760px)");
     const change = () => setNarrowScreen(media.matches);
@@ -136,14 +149,20 @@ export default function App() {
     return () => media.removeEventListener("change", change);
   }, []);
   const [data, setData] = useState(loadData),
-    [role, setRole] = useState(
+    [requestedRole, setRole] = useState(
       ROLES.some((r) => r.id === initial.get("panel"))
         ? initial.get("panel")
-        : "school",
+        : (phoneView ? demoAccount : null) || "school",
     );
-  const [page, setPage] = useState(
+  const role =
+    phoneView && demoAccount && demoAccount !== "super" && requestedRole !== "student"
+      ? demoAccount
+      : requestedRole;
+  const needsSignIn = phoneView && role !== "student" && !demoAccount;
+  const [requestedPage, setPage] = useState(
     pageNames[initial.get("page")] ? initial.get("page") : "overview",
   );
+  const page = role === requestedRole ? requestedPage : "overview";
   const [requestedAgent, setRequestedAgent] = useState(initial.get("agent"));
   const [schoolId, setSchoolId] = useState(initial.get("school") || "SCH-001");
   const [screenRecord, setScreenRecord] = useState(initial.get("record"));
@@ -179,6 +198,16 @@ export default function App() {
   }, [data]);
   useEffect(() => {
     const sync = (e) => {
+      if (e.key === DEMO_SESSION_KEY || e.key === null) {
+        const account = readDemoAccount();
+        setDemoAccount(account);
+        setSignedOut(!account);
+        setOpenRoles(false);
+        setNotifications(false);
+        setSearchOpen(false);
+        setAccessOpen(false);
+        setReset(false);
+      }
       if (e.key === STORAGE_KEY && e.newValue) {
         try {
           const next = readPreviewData(e.newValue);
@@ -194,6 +223,7 @@ export default function App() {
       if (
         (e.metaKey || e.ctrlKey) &&
         e.key.toLowerCase() === "k" &&
+        !needsSignIn &&
         !document.querySelector("dialog[open]")
       ) {
         e.preventDefault();
@@ -208,7 +238,7 @@ export default function App() {
     };
     window.addEventListener("keydown", listener);
     return () => window.removeEventListener("keydown", listener);
-  }, []);
+  }, [needsSignIn]);
   const isAgent = ["premium", "regular"].includes(role);
   const defaultAgent = data.agents.find(
     (a) =>
@@ -240,6 +270,7 @@ export default function App() {
     setSessionView({ school: id, name: "" });
   };
   useEffect(() => {
+    if (needsSignIn) return;
     const u = new URL(window.location.href);
     u.searchParams.set("panel", role);
     if (requestedAgent && ["regular", "premium"].includes(role))
@@ -268,10 +299,11 @@ export default function App() {
       if (!accessOpen) u.searchParams.delete("access");
     }
     window.history.replaceState({}, "", u);
-  }, [role, page, schoolId, screenRecord, requestedAgent, session, accessOpen]);
+  }, [role, page, schoolId, screenRecord, requestedAgent, session, accessOpen, needsSignIn]);
   const go = (target, record = null) => {
     if (phoneView && (target !== page || record !== screenRecord))
       window.history.pushState({}, "", window.location.href);
+    setRole(role);
     setPage(target);
     setScreenRecord(record);
     if (["review", "photos"].includes(target) || record)
@@ -294,6 +326,40 @@ export default function App() {
       u.searchParams.set("token", "demo-ST-0019");
       window.history.replaceState({}, "", u);
     }
+  };
+  const openAccountPicker = (id) => {
+    setAccessRole(demoRole(id) || demoAccount || "school");
+    setOpenRoles(false);
+    setAccessOpen(true);
+  };
+  const signIn = (id) => {
+    if (phoneView) {
+      try {
+        window.localStorage.setItem(DEMO_SESSION_KEY, id);
+      } catch {}
+      setDemoAccount(id);
+      setSignedOut(false);
+    }
+    if (!needsSignIn || id !== requestedRole) switchRole(id);
+    setAccessOpen(false);
+  };
+  const logOut = () => {
+    try {
+      window.localStorage.removeItem(DEMO_SESSION_KEY);
+    } catch {}
+    window.history.replaceState({}, "", window.location.pathname);
+    setDemoAccount(null);
+    setSignedOut(true);
+    setOpenRoles(false);
+    setNotifications(false);
+    setSearchOpen(false);
+    setAccessOpen(false);
+    setReset(false);
+    setRequestedAgent(null);
+    setScreenRecord(null);
+    setPage("overview");
+    changeSchool(role === "regular" ? "SCH-003" : "SCH-001");
+    window.scrollTo(0, 0);
   };
   useEffect(() => {
     const restore = () => {
@@ -613,6 +679,16 @@ export default function App() {
     ["settings", "settings"],
     ["guide", "help"],
   ].map(([key, icon]) => [key, pageNames[key], icon]);
+  if (needsSignIn) {
+    return (
+      <PreviewAccess
+        standalone
+        initialRole={role}
+        message={signedOut ? "You’re signed out." : ""}
+        onEnter={signIn}
+      />
+    );
+  }
   const workspace = (
     <div
       className={
@@ -649,6 +725,8 @@ export default function App() {
           onRoles={() => setOpenRoles(true)}
           onSearch={() => setSearchOpen(true)}
           onNotifications={() => setNotifications(true)}
+          onSwitchAccount={() => openAccountPicker(role)}
+          onLogout={logOut}
           hasUnread={hasUnread}
           reviewCount={reviewCount}
         >
@@ -826,7 +904,18 @@ export default function App() {
                 key={item.id}
                 className="phone-menu-row"
                 aria-current={role === item.id ? "true" : undefined}
-                onClick={() => switchRole(item.id)}
+                onClick={() => {
+                  if (
+                    item.id === "student" ||
+                    item.id === demoAccount ||
+                    demoAccount === "super"
+                  ) {
+                    if (item.id !== role) switchRole(item.id);
+                    else setOpenRoles(false);
+                  } else {
+                    openAccountPicker(item.id);
+                  }
+                }}
               >
                 <Icon name={item.icon} size={22} />
                 <span>
@@ -836,18 +925,6 @@ export default function App() {
                 <Icon name={role === item.id ? "check" : "chevron"} size={17} />
               </button>
             ))}
-            {role !== "student" && (
-              <Button
-                variant="secondary"
-                icon="lock"
-                onClick={() => {
-                  setOpenRoles(false);
-                  setAccessOpen(true);
-                }}
-              >
-                Preview sign-in and account setup
-              </Button>
-            )}
           </div>
         </Modal>
       )}
@@ -892,7 +969,8 @@ export default function App() {
       {accessOpen && (
         <PreviewAccess
           onClose={() => setAccessOpen(false)}
-          onEnter={switchRole}
+          onEnter={signIn}
+          initialRole={accessRole || role}
         />
       )}
       {searchOpen && (
