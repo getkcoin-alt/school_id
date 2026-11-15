@@ -69,9 +69,23 @@ export function StudentEditor({ ctx, student, onClose, onSaved }) {
     setErrors((e) => ({ ...e, [key]: null }));
   };
   const library = data.photoLibrary.filter((p) => p.school === school.id);
-  const pickLibrary = (p) => {
-    // The file name is the photo number (e.g. DSC_2002.jpg -> DSC_2002).
-    setDraft((d) => ({ ...d, photo: p.src, photoSource: "School photo library", captureAt: null, photoNo: p.name.replace(/\.[a-z0-9]+$/i, "") }));
+  // A photo comes from one place: the school's photo library or an upload from this device.
+  const [photoFrom, setPhotoFrom] = useState(library.length ? "library" : "device");
+  // The photo number is the image's file name (DSC_2002.jpg -> DSC_2002).
+  const photoName = (n) => String(n || "").replace(/\.[a-z0-9]+$/i, "").trim().toUpperCase();
+  const usedBy = (no) =>
+    no &&
+    data.students.find((s) => s.id !== draft.id && s.school === school.id && s.session === draft.session && String(s.photoNo || "").trim().toUpperCase() === no);
+  const setPhoto = (photo, source, name) => {
+    const no = photoName(name);
+    const other = usedBy(no);
+    setDraft((d) => ({ ...d, photo, photoSource: source, captureAt: null, photoNo: no }));
+    setErrors((e) => ({ ...e, photoNo: other ? `Photo no. ${no} is already used by ${other.name}.` : null }));
+    if (other) notify(`Photo no. ${no} is already used by ${other.name}. Choose another photo.`, "error");
+  };
+  const pickLibrary = (p) => setPhoto(p.src, "School photo library", p.name);
+  const clearPhoto = () => {
+    setDraft((d) => ({ ...d, photo: "", photoSource: null, photoNo: "" }));
     setErrors((e) => ({ ...e, photoNo: null }));
   };
   const save = () => {
@@ -87,6 +101,8 @@ export function StudentEditor({ ctx, student, onClose, onSaved }) {
       )
     )
       e.admission = "This admission number already exists in this school.";
+    const clash = usedBy(String(draft.photoNo || "").trim().toUpperCase());
+    if (clash) e.photoNo = `Photo no. ${String(draft.photoNo).toUpperCase()} is already used by ${clash.name}.`;
     for (const f of data.customFields.filter((f) => f.school === school.id && f.audience !== "staff" && f.enabled !== false && f.required))
       if (!String(draft.custom?.[f.id] || "").trim()) e["custom:" + f.id] = `${f.name} is required.`;
     if (Object.keys(e).length) {
@@ -136,14 +152,9 @@ export function StudentEditor({ ctx, student, onClose, onSaved }) {
       return;
     }
     const reader = new FileReader();
-    reader.onload = () =>
-      setDraft((d) => ({
-        ...d,
-        photo: reader.result,
-        photoSource: "School admin upload",
-        captureAt: null,
-      }));
+    reader.onload = () => setPhoto(reader.result, "School admin upload", file.name);
     reader.readAsDataURL(file);
+    e.target.value = "";
   };
   return (
     <Modal
@@ -164,26 +175,33 @@ export function StudentEditor({ ctx, student, onClose, onSaved }) {
             photo={draft.photo}
             size={66}
           />
-          <div>
-            <label className="btn secondary upload-label">
-              <Icon name="upload" size={15} />
-              <span>{draft.photo ? "Replace photo" : "Upload photo"}</span>
-              <input
-                type="file"
-                accept="image/jpeg,image/png,image/webp"
-                onChange={photo}
-              />
-            </label>
-            <p>JPG, PNG, WebP · max. 15 MB · manual upload</p>
+          <div className="photo-source">
+            {library.length > 0 && (
+              <div className="segmented" role="tablist" aria-label="Photo from">
+                {[
+                  ["library", `School photos (${library.length})`],
+                  ["device", "Upload from device"],
+                ].map(([k, l]) => (
+                  <button key={k} type="button" role="tab" aria-selected={photoFrom === k} className={photoFrom === k ? "active" : ""} onClick={() => setPhotoFrom(k)}>
+                    {l}
+                  </button>
+                ))}
+              </div>
+            )}
+            {photoFrom === "library" && library.length > 0 ? (
+              <LibraryPicker photos={library} onPick={pickLibrary} />
+            ) : (
+              <div>
+                <label className="btn secondary upload-label">
+                  <Icon name="upload" size={15} />
+                  <span>{draft.photo ? "Replace photo" : "Upload photo"}</span>
+                  <input type="file" accept="image/jpeg,image/png,image/webp" onChange={photo} />
+                </label>
+                <p>JPG, PNG or WebP up to 15 MB. The file name becomes the photo no.</p>
+              </div>
+            )}
           </div>
-          {library.length > 0 && <LibraryPicker photos={library} onPick={pickLibrary} />}
-          {draft.photo && (
-            <IconButton
-              icon="trash"
-              label="Remove student photo"
-              onClick={() => change("photo", "")}
-            />
-          )}
+          {draft.photo && <IconButton icon="trash" label="Remove student photo" onClick={clearPhoto} />}
         </div>
         <div className="form-grid">
           {fields.map(([key, label, type, required]) => (
@@ -192,9 +210,12 @@ export function StudentEditor({ ctx, student, onClose, onSaved }) {
               label={label}
               required={required}
               error={errors[key]}
+              hint={key === "photoNo" && draft.photo ? "Taken from the photo's file name" : undefined}
               className={key === "address" ? "span-two" : ""}
             >
-              {type === "date" ? (
+              {key === "photoNo" && draft.photo ? (
+                <input value={draft.photoNo || ""} readOnly className="readonly" title="Taken from the photo's file name" />
+              ) : type === "date" ? (
                 <DateInput value={draft[key] || ""} max={key === "dob" ? new Date().toISOString().slice(0, 10) : undefined} onChange={(v) => change(key, v)} />
               ) : optionsFor(type, data) ? (
                 <select
@@ -522,7 +543,7 @@ function LibraryPicker({ photos, onPick }) {
   const hits = photos.filter((p) => !term || p.name.toLowerCase().includes(term)).slice(0, 12);
   return (
     <div className="library-picker">
-      <Field label="Or choose from school photos" hint={`${photos.length} photos · type part of the photo number`}>
+      <Field label="Search school photos" hint="Type part of the photo number, e.g. 20 finds DSC_2002">
         <input
           value={q}
           placeholder="e.g. 2002"
@@ -987,7 +1008,7 @@ export default function Students({ ctx }) {
         <Modal
           wide
           title="Student record"
-          subtitle={`${view.id} · ${school.name}`}
+          subtitle={[view.admission && `Adm. no. ${view.admission}`, `Class ${view.classNo} ${view.section || ""}`.trim(), school.name].filter(Boolean).join(" · ")}
           onClose={() => setView(null)}
         >
           <div className="modal-body record-view">

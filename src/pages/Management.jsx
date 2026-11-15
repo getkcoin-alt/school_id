@@ -423,7 +423,7 @@ export function Schools({ ctx }) {
                       <div>
                         <strong>{s.name}</strong>
                         <small>
-                          {s.city} · {s.id}
+                          {[s.city, s.state].filter(Boolean).join(", ")}
                         </small>
                       </div>
                     </div>
@@ -507,7 +507,7 @@ export function Schools({ ctx }) {
       {detail && (
         <Modal
           title={detail.name}
-          subtitle={`${detail.id} · ${detail.city}`}
+          subtitle={[detail.city, detail.state].filter(Boolean).join(", ")}
           onClose={() => setDetail(null)}
         >
           <div className="modal-body">
@@ -1087,7 +1087,7 @@ export function Staff({ ctx }) {
                       <Avatar name={s.name} photo={s.photo} />
                       <div>
                         <strong>{s.name}</strong>
-                        <small>{s.id}</small>
+                        {s.classNo && <small>Class {s.classNo} {s.section || ""}</small>}
                       </div>
                     </div>
                   </td>
@@ -2392,7 +2392,7 @@ export function Settings({ ctx, onReset }) {
                 </select>
               </Field>
               {extraType === "select" && (
-                <Field label="Choices" hint="Separate with commas">
+                <Field label="Choices (comma separated)">
                   <input value={extraOptions} onChange={(e) => setExtraOptions(e.target.value)} placeholder="Red, Blue, Green, Yellow" />
                 </Field>
               )}

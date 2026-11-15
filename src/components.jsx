@@ -449,12 +449,44 @@ export function DeleteConfirm({ ctx, path, title, subtitle, confirmText, deleteL
  * while the value passed in and out stays ISO (yyyy-mm-dd). Dashes are added as
  * you type; an incomplete or impossible date reports "".
  */
-export function DateInput({ value, onChange, max, ...rest }) {
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+const iso = (y, m, d) => `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+/**
+ * Date box that always reads and writes dd-mm-yyyy (the format used on ID cards),
+ * while the value passed in and out stays ISO (yyyy-mm-dd). Type it (dashes are
+ * added as you type) or pick it from the calendar, which has month and year
+ * lists so a date of birth is two clicks away.
+ */
+export function DateInput({ value, onChange, max, min, disabled, ...rest }) {
   const [text, setText] = useState(toDMY(value));
   const [bad, setBad] = useState(false);
+  const [open, setOpen] = useState(false);
+  const wrap = useRef(null);
+  const today = new Date().toISOString().slice(0, 10);
+  // A date of birth (max = today) opens around ten years back; anything else on today.
+  const start = value || (max && max <= today ? `${Number(today.slice(0, 4)) - 10}-01-01` : today);
+  const [view, setView] = useState({ y: Number(start.slice(0, 4)), m: Number(start.slice(5, 7)) - 1 });
   useEffect(() => {
     if ((fromDMY(text) || "") !== (value || "")) setText(toDMY(value));
   }, [value]);
+  useEffect(() => {
+    if (!open) return;
+    const s = value || start;
+    setView({ y: Number(s.slice(0, 4)), m: Number(s.slice(5, 7)) - 1 });
+    const away = (e) => wrap.current && !wrap.current.contains(e.target) && setOpen(false);
+    const esc = (e) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", away);
+    document.addEventListener("keydown", esc, true);
+    return () => {
+      document.removeEventListener("mousedown", away);
+      document.removeEventListener("keydown", esc, true);
+    };
+  }, [open]);
   const type = (raw) => {
     // "9-" or "9/" means day 09: pad parts the person closed with a separator.
     const parts = raw.split(/[-/.]/);
@@ -465,27 +497,102 @@ export function DateInput({ value, onChange, max, ...rest }) {
       .slice(0, 8);
     const next = [digits.slice(0, 2), digits.slice(2, 4), digits.slice(4, 8)].filter(Boolean).join("-") + (/[-/.]$/.test(raw) && digits.length && digits.length < 8 && digits.length % 2 === 0 ? "-" : "");
     setText(next);
-    const iso = fromDMY(next);
+    const d = fromDMY(next);
     setBad(false);
-    onChange(iso || "");
+    onChange(d || "");
   };
+  const pick = (d) => {
+    setText(toDMY(d));
+    setBad(false);
+    onChange(d);
+    setOpen(false);
+  };
+  const maxY = Number((max || `${Number(today.slice(0, 4)) + 10}`).slice(0, 4));
+  const minY = Number((min || "1940").slice(0, 4));
+  const years = [];
+  for (let y = maxY; y >= minY; y--) years.push(y);
+  const first = new Date(Date.UTC(view.y, view.m, 1)).getUTCDay();
+  const days = new Date(Date.UTC(view.y, view.m + 1, 0)).getUTCDate();
+  const step = (n) => setView(({ y, m }) => ({ y: y + Math.floor((m + n) / 12), m: (((m + n) % 12) + 12) % 12 }));
   return (
-    <input
-      {...rest}
-      type="text"
-      inputMode="numeric"
-      placeholder="dd-mm-yyyy"
-      maxLength={10}
-      value={text}
-      aria-invalid={bad || undefined}
-      onChange={(e) => type(e.target.value)}
-      onBlur={() => {
-        const iso = fromDMY(text);
-        const tooLate = iso && max && iso > max;
-        setBad(Boolean(text) && (!iso || tooLate));
-        if (iso) setText(toDMY(iso));
-      }}
-    />
+    <span className="date-input" ref={wrap}>
+      <input
+        {...rest}
+        disabled={disabled}
+        type="text"
+        inputMode="numeric"
+        placeholder="dd-mm-yyyy"
+        maxLength={10}
+        value={text}
+        aria-invalid={bad || undefined}
+        onChange={(e) => type(e.target.value)}
+        onBlur={() => {
+          const d = fromDMY(text);
+          setBad(Boolean(text) && (!d || Boolean(max && d > max) || Boolean(min && d < min)));
+          if (d) setText(toDMY(d));
+        }}
+      />
+      <button type="button" className="date-input-btn" aria-label="Open calendar" disabled={disabled} onClick={() => setOpen(!open)}>
+        <Icon name="calendar" size={16} />
+      </button>
+      {open && (
+        <div className="calendar-pop" role="dialog" aria-label="Choose a date">
+          <div className="calendar-head">
+            <button type="button" className="icon-btn" aria-label="Previous month" onClick={() => step(-1)}>
+              <Icon name="left" size={16} />
+            </button>
+            <select aria-label="Month" value={view.m} onChange={(e) => setView({ ...view, m: Number(e.target.value) })}>
+              {MONTHS.map((m, i) => (
+                <option key={m} value={i}>
+                  {m}
+                </option>
+              ))}
+            </select>
+            <select aria-label="Year" value={view.y} onChange={(e) => setView({ ...view, y: Number(e.target.value) })}>
+              {!years.includes(view.y) && <option value={view.y}>{view.y}</option>}
+              {years.map((y) => (
+                <option key={y} value={y}>
+                  {y}
+                </option>
+              ))}
+            </select>
+            <button type="button" className="icon-btn" aria-label="Next month" onClick={() => step(1)}>
+              <Icon name="chevron" size={16} />
+            </button>
+          </div>
+          <div className="calendar-grid">
+            {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((d) => (
+              <span key={d} className="calendar-dow">
+                {d}
+              </span>
+            ))}
+            {Array.from({ length: first }, (_, i) => (
+              <span key={"b" + i} />
+            ))}
+            {Array.from({ length: days }, (_, i) => {
+              const d = iso(view.y, view.m, i + 1);
+              const off = (max && d > max) || (min && d < min);
+              return (
+                <button
+                  type="button"
+                  key={d}
+                  disabled={off}
+                  className={`calendar-day${d === value ? " on" : ""}${d === today ? " today" : ""}`}
+                  onClick={() => pick(d)}
+                >
+                  {i + 1}
+                </button>
+              );
+            })}
+          </div>
+          {(!max || today <= max) && (!min || today >= min) && (
+            <button type="button" className="calendar-today" onClick={() => pick(today)}>
+              Today
+            </button>
+          )}
+        </div>
+      )}
+    </span>
   );
 }
 export function CardPreview({

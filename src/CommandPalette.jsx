@@ -56,7 +56,7 @@ export default function CommandPalette({ live, api, data, availableSchools, role
       students = data.students.filter((s) => mine(s.school) && has(s.name, s.admission)).slice(0, 8).map((s) => ({ id: s.id, name: s.name, admissionNo: s.admission, className: s.classNo, section: s.section, session: s.session, status: s.status, schoolId: s.school, schoolName: data.schools.find((x) => x.id === s.school)?.name, current: true }));
       schools = role === "school" ? [] : availableSchools.filter((s) => has(s.name, s.city)).slice(0, 5).map((s) => ({ id: s.id, name: s.name, city: s.city }));
       agents = role === "super" ? data.agents.filter((a) => has(a.name, a.company)).slice(0, 5) : [];
-      batches = data.batches.filter((b) => has(b.name, b.id)).slice(0, 5).map((b) => ({ id: b.id, code: b.id, name: b.name, status: b.status, schoolId: b.school }));
+      batches = data.batches.filter((b) => has(b.name, b.id)).slice(0, 5).map((b) => ({ id: b.id, code: b.code || "", name: b.rawName || b.name, status: b.status, schoolId: b.school }));
     }
     out.push([
       "Students",
@@ -72,7 +72,7 @@ export default function CommandPalette({ live, api, data, availableSchools, role
     out.push(["Schools", schools.map((s) => ({ key: "sc" + s.id, icon: "school", title: s.name, sub: s.city, run: (x) => x.openSchool(s) }))]);
     out.push(["Agents", agents.map((a) => ({ key: "ag" + a.id, icon: "briefcase", title: a.name, sub: a.company, run: (x) => x.go("agents", { search: a.name }) }))]);
     out.push(["Staff", staff.map((s) => ({ key: "st" + s.id, icon: "user", title: s.name, sub: [s.role, role !== "school" && s.schoolName].filter(Boolean).join(" · "), run: (x) => x.openSchool({ id: s.schoolId }, "staff") }))]);
-    out.push(["Print batches", batches.map((b) => ({ key: "b" + b.id, icon: "print", title: `${b.code} · ${b.name}`, sub: b.schoolName, run: (x) => x.go("printing") }))]);
+    out.push(["Print batches", batches.map((b) => ({ key: "b" + b.id, icon: "print", title: b.code ? `${b.code} · ${b.name}` : b.name, sub: b.schoolName, run: (x) => x.go("printing") }))]);
     out.push(["Actions", actionItems]);
     out.push(["Pages", pageItems]);
     return out.filter(([, items]) => items.length);

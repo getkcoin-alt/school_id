@@ -500,7 +500,7 @@ export function PhotoUploads({ ctx }) {
                           </span>
                           <div>
                             <strong>{u.name}</strong>
-                            <small>{u.note || u.id}</small>
+                            {u.note && <small>{u.note}</small>}
                           </div>
                         </div>
                       </td>
@@ -1174,7 +1174,7 @@ export function PrintOrders({ ctx }) {
       b.staffSnapshot ||
       data.staff.filter((s) => (b.staffIds || []).includes(s.id));
     download(
-      `${b.id}.csv`,
+      `${b.code || "batch"}.csv`,
       csvText(
         [
           ...ss.map((s) => ({ ...s, type: "Student" })),
@@ -1321,7 +1321,8 @@ export function PrintOrders({ ctx }) {
                   <td>
                     <strong>{b.name}</strong>
                     <small className="block muted">
-                      {b.code || b.id} · {fmtDate(b.date)}
+                      {b.code ? `${b.code} · ` : ""}
+                      {fmtDate(b.date)}
                     </small>
                   </td>
                   <td>{data.schools.find((s) => s.id === b.school)?.name}</td>
@@ -1339,7 +1340,7 @@ export function PrintOrders({ ctx }) {
                     <div className="row-actions">
                       <IconButton
                         icon="eye"
-                        label={"View batch " + b.id}
+                        label={"View batch " + (b.code || b.name)}
                         onClick={() => {
                           setDetail(b);
                           setNextStatus(b.status);
@@ -1349,14 +1350,14 @@ export function PrintOrders({ ctx }) {
                       />
                       <IconButton
                         icon="download"
-                        label={"Export batch " + b.id}
+                        label={"Export batch " + (b.code || b.name)}
                         onClick={() => {
                           if (live) {
                             if (!canDownload) {
                               notify("Your plan does not include downloads.", "error");
                               return;
                             }
-                            ctx.download(`/batches/${b.id}/download.zip`, `${b.code || b.id}.zip`);
+                            ctx.download(`/batches/${b.id}/download.zip`, `${b.code || "batch"}.zip`);
                             return;
                           }
                           if (
@@ -1374,7 +1375,7 @@ export function PrintOrders({ ctx }) {
                       {ctx.live && (role === "super" || BATCH_DELETABLE.includes(b.status)) && (
                         <IconButton
                           icon="trash"
-                          label={"Delete batch " + (b.code || b.id)}
+                          label={"Delete batch " + (b.code || b.name)}
                           onClick={() => setRemoveBatch(b)}
                         />
                       )}
@@ -1397,8 +1398,7 @@ export function PrintOrders({ ctx }) {
         an approved student returns the record to review. Printed output in this
         preview is a sample card proof.
       </Callout>
-      <OrderForms ctx={ctx} />
-      {create && (
+      {create && !confirmBatch && (
         <Modal
           wide
           title="Create a print batch"
@@ -1512,48 +1512,85 @@ export function PrintOrders({ ctx }) {
                 text={kind === "Students" ? "Approve students in Review submissions first." : "Approve staff from the staff directory first."}
               />
             )}
-            {confirmBatch && (
-              <div className="batch-confirm">
-                <strong>Before you send {picked} {kind === "Students" ? "student" : "staff"} card{picked === 1 ? "" : "s"} to print</strong>
-                <ul>
-                  <li>
-                    The cards are locked as <b>Submitted for print</b>. Changing a student or staff record afterwards will not change the printed card.
-                  </li>
-                  {roundInfo?.after && <li>{roundInfo.after}</li>}
-                  <li>The printer is notified and you can follow the batch on this page until it is delivered.</li>
-                  <li>Until printing starts you can still delete the batch; the cards then go back to Approved.</li>
-                </ul>
-              </div>
-            )}
           </div>
           <div className="modal-actions">
             <span className="muted">{picked} cards selected</span>
-            <Button
-              variant="secondary"
-              onClick={() => (confirmBatch ? setConfirmBatch(false) : setCreate(false))}
-            >
-              {confirmBatch ? "Back" : "Cancel"}
+            <Button variant="secondary" onClick={() => setCreate(false)}>
+              Cancel
             </Button>
-            {confirmBatch ? (
-              <Button icon="print" onClick={submit}>
-                Confirm and send to print
-              </Button>
-            ) : (
-              <Button disabled={!picked || roundInfo?.blocked} icon="print" onClick={() => setConfirmBatch(true)}>
-                Review and send
-              </Button>
-            )}
+            <Button disabled={!picked || roundInfo?.blocked} icon="print" onClick={() => setConfirmBatch(true)}>
+              Review and send
+            </Button>
           </div>
         </Modal>
       )}
+      {create && confirmBatch && (() => {
+        const who = kind === "Students" ? "student" : "staff";
+        const list = kind === "Students" ? students.filter((s) => selected.includes(s.id)) : staff.filter((s) => staffIds.includes(s.id));
+        const r = rounds?.[kind === "Students" ? "student" : "staff"];
+        const leftAfter = r?.allowed ? Math.max(0, r.allowed - r.used - 1) : null;
+        return (
+          <Modal title={`Before you send ${picked} ${who} card${picked === 1 ? "" : "s"} to print`} subtitle={`${school.name}${rounds?.session ? " · " + rounds.session : ""}`} onClose={() => setConfirmBatch(false)}>
+            <div className="modal-body batch-review">
+              <div className="review-stats">
+                <div>
+                  <span>Cards</span>
+                  <strong>{picked}</strong>
+                </div>
+                {r?.allowed > 0 && (
+                  <>
+                    <div>
+                      <span>Total rounds</span>
+                      <strong>{r.allowed}</strong>
+                    </div>
+                    <div>
+                      <span>This round</span>
+                      <strong>{Math.min(r.used + 1, r.allowed) === r.used + 1 ? `${r.used + 1} of ${r.allowed}` : "Extra"}</strong>
+                    </div>
+                    <div className={leftAfter === 0 ? "warn" : ""}>
+                      <span>Left after</span>
+                      <strong>{leftAfter}</strong>
+                    </div>
+                  </>
+                )}
+              </div>
+              {leftAfter === 0 && r.used < r.allowed && (
+                <Callout icon="alert" tone="amber">
+                  This is the last {who} round. Include every {who === "student" ? "student" : "staff member"} you can.
+                </Callout>
+              )}
+              <ul className="review-list">
+                {list.map((s) => (
+                  <li key={s.id}>
+                    <Avatar name={s.name} photo={s.photo} size={32} />
+                    <span>
+                      <strong>{s.name}</strong>
+                      <small>{kind === "Students" ? `Class ${s.classNo} ${s.section || ""}`.trim() : s.role}</small>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <p className="review-note">Cards are locked as Submitted for print. Later changes to these records will not change the printed cards.</p>
+            </div>
+            <div className="modal-actions">
+              <Button variant="secondary" icon="back" onClick={() => setConfirmBatch(false)}>
+                Back
+              </Button>
+              <Button icon="print" onClick={submit}>
+                Send {picked} to print
+              </Button>
+            </div>
+          </Modal>
+        );
+      })()}
       {removeBatch && (
         <DeleteConfirm
           ctx={ctx}
           path={`/batches/${removeBatch.id}`}
-          title={`Delete batch ${removeBatch.code || removeBatch.id}?`}
+          title={`Delete batch ${removeBatch.code || removeBatch.rawName || "batch"}?`}
           subtitle={`${data.schools.find((s) => s.id === removeBatch.school)?.name || ""} · ${removeBatch.count} cards · ${removeBatch.status}`}
           deleteLabel="Delete batch"
-          doneText={`Batch ${removeBatch.code || removeBatch.id} deleted.`}
+          doneText={`Batch ${removeBatch.code || removeBatch.rawName || "batch"} deleted.`}
           onClose={() => setRemoveBatch(null)}
         />
       )}
@@ -1561,7 +1598,7 @@ export function PrintOrders({ ctx }) {
         <Modal
           wide
           title={detail.name}
-          subtitle={`${detail.id} · ${detail.count} cards · ${detail.owner}`}
+          subtitle={[detail.code, `${detail.count} cards`, detail.owner].filter(Boolean).join(" · ")}
           onClose={() => setDetail(null)}
         >
           <div className="modal-body">
@@ -1686,12 +1723,12 @@ export function PrintOrders({ ctx }) {
                             b.id === detail.id ? updated : b,
                           ),
                         },
-                        `${detail.id} marked ${nextStatus.toLowerCase()}`,
+                        `${detail.code || detail.name} marked ${nextStatus.toLowerCase()}`,
                         "print",
                       ),
                     );
                     setDetail(updated);
-                    notify(live ? `${detail.code || detail.id} is now ${nextStatus.toLowerCase()}. The school has been notified.` : "Production status updated across the preview.");
+                    notify(live ? `${detail.code || detail.name} is now ${nextStatus.toLowerCase()}. The school has been notified.` : "Production status updated across the preview.");
                   }}
                 >
                   Save production update
@@ -1793,26 +1830,131 @@ const ORDER_TERMS = [
 
 const formValue = (v) => (v === true ? "Yes" : v === false ? "No" : v == null || v === "" ? "—" : String(v));
 
+const ORDER_ADDRESS = "G-16, City Plaza, Near Axis Bank, Old D.C. Road, Sonipat-131001 · (M) 8999428000, 8999424000";
+const orderValue = (d, [k, , t]) => (t === "date" && d[k] ? toDMY(d[k]) : formValue(d[k]));
+const orderFileName = (f) => `Order form - ${String(f.schoolName || "school").replace(/[^\w\- ]+/g, "")}.pdf`;
+
 function printOrderForm(f) {
   const d = f.details || {};
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
-  const body = ORDER_SECTIONS.map(
-    (s) =>
-      `<h2>${esc(s.title)}</h2><table>${s.fields
-        .map(([k, l, t]) => `<tr><th>${esc(l)}</th><td>${esc(t === "date" && d[k] ? toDMY(d[k]) : formValue(d[k]))}</td></tr>`)
-        .join("")}</table>`,
-  ).join("") + `<h2>Terms &amp; conditions</h2><ol>${ORDER_TERMS.map((t) => `<li>${esc(t)}</li>`).join("")}</ol>`;
+  const body =
+    ORDER_SECTIONS.map(
+      (s) =>
+        `<h2>${esc(s.title)}</h2>${s.note ? `<p>${esc(s.note)}</p>` : ""}<table>${s.fields
+          .map((fd) => `<tr><th>${esc(fd[1])}</th><td>${esc(orderValue(d, fd))}</td></tr>`)
+          .join("")}</table>`,
+    ).join("") + `<h2>Terms &amp; conditions</h2><ol>${ORDER_TERMS.map((t) => `<li>${esc(t)}</li>`).join("")}</ol>`;
   const w = window.open("", "_blank");
   if (!w) return;
   w.document.write(
-    `<!doctype html><html><head><meta charset="utf-8"><title>Order form · ${esc(f.schoolName)}</title><style>body{font:14px/1.5 system-ui,sans-serif;margin:32px;color:#111}h1{font-size:20px;margin:0 0 4px}h2{font-size:15px;margin:20px 0 6px;border-bottom:1px solid #999}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:5px 8px;border-bottom:1px solid #ddd;vertical-align:top}th{width:40%;font-weight:600}p{color:#555;margin:0}</style></head><body><h1>CtC Id Solutions · ID card order form</h1><p>G-16, City Plaza, Near Axis Bank, Old D.C. Road, Sonipat-131001</p><p>${esc(f.schoolName)}${f.note ? " · " + esc(f.note) : ""}</p>${body}<script>window.onload=()=>window.print()</script></body></html>`,
+    `<!doctype html><html><head><meta charset="utf-8"><title>Order form · ${esc(f.schoolName)}</title><style>body{font:13px/1.5 system-ui,sans-serif;margin:28px;color:#111}h1{font-size:22px;margin:0}h2{font-size:14px;margin:18px 0 6px;padding-bottom:3px;border-bottom:1px solid #999;text-transform:uppercase;letter-spacing:.4px}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:4px 8px;border-bottom:1px solid #e3e3e3;vertical-align:top}th{width:38%;font-weight:600}p{color:#555;margin:2px 0}ol{padding-left:18px}</style></head><body><h1>CtC Id Solutions</h1><p>${esc(ORDER_ADDRESS)}</p><p><b>${esc(f.schoolName)}</b>${f.note ? " · " + esc(f.note) : ""}</p>${body}<script>window.onload=()=>window.print()</script></body></html>`,
   );
   w.document.close();
 }
 
+/** A filled CtC order form as a PDF the agent or school can keep or share. */
+async function orderPDF(f) {
+  const { jsPDF } = await import("jspdf");
+  const doc = new jsPDF({ unit: "mm", format: "a4" });
+  const d = f.details || {};
+  const W = 210, L = 16, R = W - 16;
+  let y = 18;
+  const room = (h) => {
+    if (y + h > 282) {
+      doc.addPage();
+      y = 18;
+    }
+  };
+  doc.setFont("helvetica", "bold").setFontSize(20).text("CtC Id Solutions", L, y);
+  doc.setFont("helvetica", "normal").setFontSize(8.5).setTextColor(90).text(ORDER_ADDRESS, R, y, { align: "right", maxWidth: 95 });
+  y += 8;
+  doc.setDrawColor(40).setLineWidth(0.5).line(L, y, R, y);
+  y += 7;
+  doc.setTextColor(20).setFontSize(12).setFont("helvetica", "bold").text("ID card order form", L, y);
+  doc.setFont("helvetica", "normal").setFontSize(10).text(f.schoolName || "", R, y, { align: "right" });
+  y += 4;
+  for (const sec of ORDER_SECTIONS) {
+    room(16);
+    y += 6;
+    doc.setFont("helvetica", "bold").setFontSize(9.5).setTextColor(60).text(sec.title.toUpperCase(), L, y);
+    y += 1.8;
+    doc.setDrawColor(200).setLineWidth(0.2).line(L, y, R, y);
+    y += 4.5;
+    if (sec.note) {
+      doc.setFont("helvetica", "italic").setFontSize(8.5).setTextColor(110).text(sec.note, L, y);
+      y += 4.5;
+    }
+    for (const fd of sec.fields) {
+      const lines = doc.setFont("helvetica", "normal").setFontSize(10).splitTextToSize(orderValue(d, fd), R - L - 58);
+      room(lines.length * 4.6 + 1.5);
+      doc.setTextColor(110).text(fd[1], L, y);
+      doc.setTextColor(20).text(lines, L + 58, y);
+      y += lines.length * 4.6 + 1.5;
+    }
+  }
+  room(34);
+  y += 6;
+  doc.setFont("helvetica", "bold").setFontSize(9.5).setTextColor(60).text("TERMS & CONDITIONS", L, y);
+  y += 5;
+  doc.setFont("helvetica", "normal").setFontSize(8.5).setTextColor(80);
+  for (const t of ORDER_TERMS) {
+    const lines = doc.splitTextToSize("• " + t, R - L);
+    room(lines.length * 4);
+    doc.text(lines, L, y);
+    y += lines.length * 4;
+  }
+  doc.save(orderFileName(f));
+}
+
+/** One order-form field: segmented choice, date, long text or short text. */
+function OrderControl({ field: [k, l, t, req], value, set }) {
+  if (Array.isArray(t))
+    return (
+      <div className="of-seg" role="radiogroup" aria-label={l}>
+        {t.map((o) => (
+          <button key={o} type="button" role="radio" aria-checked={value === o} className={value === o ? "on" : ""} onClick={() => set(value === o ? "" : o)}>
+            {o}
+          </button>
+        ))}
+      </div>
+    );
+  if (t === "date") return <DateInput value={value || ""} onChange={set} />;
+  if (t === "wide") return <textarea rows="2" maxLength="500" value={value || ""} onChange={(e) => set(e.target.value)} />;
+  return (
+    <input
+      required={req}
+      className={t === "number" ? "of-num" : undefined}
+      type={t === "number" ? "number" : t === "email" ? "email" : t === "tel" ? "tel" : "text"}
+      inputMode={t === "number" ? "decimal" : t === "tel" ? "tel" : undefined}
+      min={t === "number" ? "0" : undefined}
+      maxLength="200"
+      value={value ?? ""}
+      onChange={(e) => set(e.target.value)}
+    />
+  );
+}
+
+function OrderLetterhead({ school }) {
+  return (
+    <div className="of-letterhead">
+      <div className="of-brand">
+        <strong>CtC</strong> Id Solutions
+      </div>
+      <div className="of-address">
+        G-16, City Plaza, Near Axis Bank
+        <br />
+        Old D.C. Road, Sonipat-131001
+        <br />
+        (M) 8999428000, 8999424000
+      </div>
+      {school && <div className="of-for">ID card order form · {school}</div>}
+    </div>
+  );
+}
+
 function OrderFormEditor({ ctx, form, schools, onClose }) {
   const { live, notify, update } = ctx;
-  const first = form?.schoolId || ctx.school.id;
+  const first = form?.schoolId || form?.school || ctx.school.id;
   const schoolOf = (id) => schools.find((s) => s.id === id);
   const prefill = (id) => {
     const s = schoolOf(id) || {};
@@ -1849,7 +1991,7 @@ function OrderFormEditor({ ctx, form, schools, onClose }) {
         update((data) => ({
           ...data,
           orderForms: form
-            ? (data.orderForms || []).map((f) => (f.id === form.id ? { ...f, details, note } : f))
+            ? (data.orderForms || []).map((f) => (f.id === form.id ? { ...f, details: details || f.details, note } : f))
             : [{ id: uid("OF"), school: schoolId, schoolId, schoolName: schoolOf(schoolId)?.name, fileName: file?.name || null, details, note, createdAt: new Date().toISOString() }, ...(data.orderForms || [])],
         }));
       notify(form ? "Order form updated." : `Order form saved. ${schoolOf(schoolId)?.name || "The school"} can now see it.`);
@@ -1861,102 +2003,91 @@ function OrderFormEditor({ ctx, form, schools, onClose }) {
     }
   };
   return (
-    <Modal wide title={form ? "Edit order form" : "New order form"} subtitle="CtC Id Solutions ID card order form. The school can view and print it but not change it." onClose={onClose}>
+    <Modal wide title={form ? `Edit order form · ${form.schoolName}` : "New order form"} subtitle="The school can view, download and print it, but not change it." onClose={onClose}>
       <form onSubmit={save}>
-        <div className="modal-body order-form">
-        {!form && (
-          <div className="segmented" role="tablist" aria-label="How to add the order form">
-            {[
-              ["fill", "Fill in the form"],
-              ["upload", "Upload a filled form"],
-            ].map(([m, l]) => (
-              <button key={m} type="button" role="tab" aria-selected={mode === m} className={mode === m ? "active" : ""} onClick={() => setMode(m)}>
-                {l}
-              </button>
-            ))}
-          </div>
-        )}
-        <div className="form-grid">
-          <Field label="School" required>
-            <select
-              required
-              disabled={Boolean(form)}
-              value={schoolId}
-              onChange={(e) => {
-                setSchoolId(e.target.value);
-                setD({ ...d, ...prefill(e.target.value) });
-              }}
-            >
-              {schools.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
-          </Field>
+        <div className="modal-body of-body">
           {!form && (
-            <Field label={mode === "upload" ? "Filled order form" : "Signed scan (optional)"} required={mode === "upload"} hint="PDF or photo, up to 10 MB">
-              <input type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" onChange={(e) => setFile(e.target.files?.[0] || null)} />
-            </Field>
-          )}
-        </div>
-        {mode === "fill" && ORDER_SECTIONS.map((sec) => (
-          <fieldset key={sec.title} className="order-section">
-            <legend>{sec.title}</legend>
-            {sec.note && <p className="muted small-note">{sec.note}</p>}
-            <div className="form-grid">
-              {sec.fields.map(([k, l, t, req, hint]) =>
-                Array.isArray(t) ? (
-                  <div key={k} className="field choice-field">
-                    <span className="field-label">
-                      {l}
-                      {hint && <small className="muted"> · {hint}</small>}
-                    </span>
-                    <div className="choice-row" role="radiogroup" aria-label={l}>
-                      {t.map((o) => (
-                        <label key={o} className={`choice ${d[k] === o ? "on" : ""}`}>
-                          <input type="radio" name={k} checked={d[k] === o} onChange={() => set(k, o)} />
-                          {o}
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                ) : t === "date" ? (
-                  <Field key={k} label={l}>
-                    <DateInput value={d[k] || ""} onChange={(v) => set(k, v)} />
-                  </Field>
-                ) : (
-                  <Field key={k} label={l} required={req} hint={hint} className={t === "wide" ? "span-2" : undefined}>
-                    {t === "wide" ? (
-                      <textarea rows="2" maxLength="500" value={d[k] || ""} onChange={(e) => set(k, e.target.value)} />
-                    ) : (
-                      <input required={req} type={t === "number" ? "number" : t === "email" ? "email" : t === "tel" ? "tel" : "text"} min={t === "number" ? "0" : undefined} maxLength="200" value={d[k] ?? ""} onChange={(e) => set(k, e.target.value)} />
-                    )}
-                  </Field>
-                ),
-              )}
-            </div>
-          </fieldset>
-        ))}
-        {mode === "fill" && (
-          <div className="order-terms">
-            <strong>Terms &amp; conditions</strong>
-            <ol>
-              {ORDER_TERMS.map((t) => (
-                <li key={t}>{t}</li>
+            <div className="segmented" role="tablist" aria-label="How to add the order form">
+              {[
+                ["fill", "Fill in the form"],
+                ["upload", "Upload a filled form"],
+              ].map(([m, l]) => (
+                <button key={m} type="button" role="tab" aria-selected={mode === m} className={mode === m ? "active" : ""} onClick={() => setMode(m)}>
+                  {l}
+                </button>
               ))}
-            </ol>
+            </div>
+          )}
+          <div className="form-grid">
+            <Field label="School" required>
+              <select
+                required
+                disabled={Boolean(form)}
+                value={schoolId}
+                onChange={(e) => {
+                  setSchoolId(e.target.value);
+                  setD({ ...d, ...prefill(e.target.value) });
+                }}
+              >
+                {schools.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            {!form && (
+              <Field label={mode === "upload" ? "Filled order form" : "Signed copy (optional)"} required={mode === "upload"} hint="PDF or photo, up to 10 MB">
+                <input type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+              </Field>
+            )}
           </div>
-        )}
-        <Field label="Note (optional)">
-          <input maxLength="500" value={note} onChange={(e) => setNote(e.target.value)} />
-        </Field>
+          {mode === "fill" && (
+            <div className="of-sheet">
+              <OrderLetterhead />
+              {ORDER_SECTIONS.map((sec) => (
+                <section key={sec.title} className="of-section">
+                  <h3>{sec.title}</h3>
+                  {sec.note && <p className="of-note">{sec.note}</p>}
+                  <div className="of-grid">
+                    {sec.fields.map((fd) => {
+                      const [k, l, t, req, hint] = fd;
+                      const full = Array.isArray(t) || t === "wide";
+                      return (
+                        <div key={k} className={`of-row${full ? " full" : ""}`}>
+                          <span className="of-label">
+                            {l}
+                            {req && <b> *</b>}
+                          </span>
+                          <div className="of-control">
+                            <OrderControl field={fd} value={d[k]} set={(v) => set(k, v)} />
+                            {hint && <small>{hint}</small>}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
+              ))}
+              <div className="order-terms">
+                <strong>Terms &amp; conditions</strong>
+                <ol>
+                  {ORDER_TERMS.map((t) => (
+                    <li key={t}>{t}</li>
+                  ))}
+                </ol>
+              </div>
+            </div>
+          )}
+          <Field label="Internal note (optional)" hint="Shown with the order form in the list">
+            <input maxLength="500" value={note} onChange={(e) => setNote(e.target.value)} />
+          </Field>
         </div>
         <div className="modal-actions">
           <Button variant="secondary" type="button" onClick={onClose}>
             Cancel
           </Button>
-          <Button type="submit" disabled={busy}>
+          <Button type="submit" icon="check" disabled={busy}>
             {busy ? "Saving…" : form ? "Save changes" : "Save order form"}
           </Button>
         </div>
@@ -1968,45 +2099,53 @@ function OrderFormEditor({ ctx, form, schools, onClose }) {
 function OrderFormView({ form, onClose }) {
   const d = form.details || {};
   return (
-    <Modal wide title={`Order form · ${form.schoolName}`} subtitle={`Filled on ${fmtDate(form.createdAt)}${form.note ? " · " + form.note : ""}`} onClose={onClose}>
+    <Modal wide title={`Order form · ${form.schoolName}`} subtitle={`Added on ${fmtDate(form.createdAt)}${form.note ? " · " + form.note : ""}`} onClose={onClose}>
       <div className="modal-body">
-      {!form.details && <p className="muted">This order form was uploaded as a file. Open it with the button below.</p>}
-      {form.details &&
-        ORDER_SECTIONS.map((sec) => (
-          <div key={sec.title} className="order-view">
-            <h3>{sec.title}</h3>
-            {sec.note && <p className="muted small-note">{sec.note}</p>}
-            <dl>
-              {sec.fields.map(([k, l, t]) => (
-                <React.Fragment key={k}>
-                  <dt>{l}</dt>
-                  <dd>{t === "date" && d[k] ? toDMY(d[k]) : formValue(d[k])}</dd>
-                </React.Fragment>
-              ))}
-            </dl>
-          </div>
-        ))}
-      {form.details && (
-        <div className="order-terms">
-          <strong>Terms &amp; conditions</strong>
-          <ol>
-            {ORDER_TERMS.map((t) => (
-              <li key={t}>{t}</li>
+        {!form.details ? (
+          <Empty title="Uploaded order form" text="This order form was uploaded as a file. Download it to open it." />
+        ) : (
+          <div className="of-sheet of-read">
+            <OrderLetterhead school={form.schoolName} />
+            {ORDER_SECTIONS.map((sec) => (
+              <section key={sec.title} className="of-section">
+                <h3>{sec.title}</h3>
+                {sec.note && <p className="of-note">{sec.note}</p>}
+                <dl className="of-grid">
+                  {sec.fields.map((fd) => (
+                    <div key={fd[0]} className={`of-row${fd[2] === "wide" ? " full" : ""}`}>
+                      <dt className="of-label">{fd[1]}</dt>
+                      <dd>{orderValue(d, fd)}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </section>
             ))}
-          </ol>
-        </div>
-      )}
+            <div className="order-terms">
+              <strong>Terms &amp; conditions</strong>
+              <ol>
+                {ORDER_TERMS.map((t) => (
+                  <li key={t}>{t}</li>
+                ))}
+              </ol>
+            </div>
+          </div>
+        )}
       </div>
       <div className="modal-actions">
         {form.url && (
           <a className="btn secondary" href={form.url} target="_blank" rel="noreferrer">
-            <Icon name="download" size={15} /> {form.details ? "Signed scan" : "Open order form"}
+            <Icon name="download" size={15} /> {form.details ? "Signed copy" : "Download"}
           </a>
         )}
         {form.details && (
-          <Button variant="secondary" onClick={() => printOrderForm(form)}>
-            <Icon name="print" size={15} /> Print
-          </Button>
+          <>
+            <Button variant="secondary" icon="print" onClick={() => printOrderForm(form)}>
+              Print
+            </Button>
+            <Button variant="secondary" icon="download" onClick={() => orderPDF(form)}>
+              Download PDF
+            </Button>
+          </>
         )}
         <Button onClick={onClose}>Close</Button>
       </div>
@@ -2014,13 +2153,22 @@ function OrderFormView({ form, onClose }) {
   );
 }
 
-function OrderForms({ ctx }) {
+/** Production › Order forms: agents and ID Card Studio fill in or upload the CtC order form; schools view and download it. */
+export function OrderFormsPage({ ctx }) {
   const { live, school, data, notify, update, role } = ctx;
-  const canManage = role !== "school"; // super admin and agents fill in, edit and delete order forms
+  const canManage = role !== "school";
   const schools = ctx.availableSchools || data.schools;
   const [edit, setEdit] = useState(null); // null | "new" | form
   const [view, setView] = useState(null);
-  const forms = (data.orderForms || []).filter((f) => (role === "school" ? (f.schoolId || f.school) === school.id : true));
+  const [query, setQuery] = useState("");
+  const forms = (data.orderForms || [])
+    .filter((f) => (role === "school" ? (f.schoolId || f.school) === school.id : true))
+    .filter((f) => !query.trim() || String(f.schoolName || "").toLowerCase().includes(query.trim().toLowerCase()));
+  const download = (f) => {
+    if (f.details) orderPDF(f).catch((e) => notify(e.message, "error"));
+    else if (f.url) window.open(f.url, "_blank", "noopener");
+    else notify("This order form has no file to download.", "error");
+  };
   const remove = async (f) => {
     if (!window.confirm(`Delete the order form for ${f.schoolName}? This cannot be undone.`)) return;
     try {
@@ -2034,56 +2182,75 @@ function OrderForms({ ctx }) {
     }
   };
   return (
-    <Panel
-      title="Order forms"
-      subtitle={canManage ? "Fill in the CtC order form for a school. The school sees it but cannot change or delete it." : `Order forms filled in for ${school.name} by your agent.`}
-      action={
-        canManage && (
-          <Button onClick={() => setEdit("new")}>
-            <Icon name="plus" size={15} /> New order form
+    <>
+      <PageTitle
+        eyebrow="PRODUCTION"
+        title="Order forms"
+        description={canManage ? "The CtC order form for each school: fill it in on screen or upload the signed paper form." : `Order forms for ${school.name}, added by your agent.`}
+      >
+        {canManage && (
+          <Button icon="plus" onClick={() => setEdit("new")}>
+            New order form
           </Button>
-        )
-      }
-    >
-      {forms.length > 0 ? (
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>SCHOOL</th>
-                <th>CARD</th>
-                <th>DORI</th>
-                <th>DATE</th>
-                <th aria-label="Actions" />
-              </tr>
-            </thead>
-            <tbody>
-              {forms.map((f) => (
-                <tr key={f.id}>
-                  <td>
-                    <button type="button" className="link-btn" onClick={() => setView(f)}>
-                      {f.schoolName}
-                    </button>
-                    {f.note && <small className="block muted">{f.note}</small>}
-                  </td>
-                  <td>{f.details?.cardType || (f.fileName ? "Uploaded file" : "—")}</td>
-                  <td>{f.details?.doriType ? `${f.details.doriType}${f.details.doriCount ? " · " + f.details.doriCount : ""}` : "—"}</td>
-                  <td>{f.details?.date ? toDMY(f.details.date) : fmtDate(f.createdAt)}</td>
-                  <td className="row-actions">
-                    <IconButton icon="eye" label="View order form" onClick={() => setView(f)} />
-                    {canManage && f.details && <IconButton icon="edit" label="Edit order form" onClick={() => setEdit(f)} />}
-                    {canManage && <IconButton icon="trash" label="Delete order form" onClick={() => remove(f)} />}
-                  </td>
+        )}
+      </PageTitle>
+      <Panel
+        title={`${forms.length} order form${forms.length === 1 ? "" : "s"}`}
+        subtitle={canManage ? "Schools can view and download their order forms but cannot change or delete them." : "View, download or print an order form."}
+        action={
+          canManage && (
+            <input className="of-search" type="search" placeholder="Search by school" aria-label="Search order forms by school" value={query} onChange={(e) => setQuery(e.target.value)} />
+          )
+        }
+      >
+        {forms.length > 0 ? (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>SCHOOL</th>
+                  <th>FORM</th>
+                  <th>CARD</th>
+                  <th>DORI</th>
+                  <th>DATE</th>
+                  <th aria-label="Actions" />
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ) : (
-        <Empty title="No order forms yet" text={canManage ? "Use New order form to fill in the CtC order form for a school." : "Your agent will add the order form here."} />
-      )}
+              </thead>
+              <tbody>
+                {forms.map((f) => (
+                  <tr key={f.id}>
+                    <td>
+                      <button type="button" className="link-btn" onClick={() => setView(f)}>
+                        {f.schoolName}
+                      </button>
+                      {f.note && <small className="block muted">{f.note}</small>}
+                    </td>
+                    <td>
+                      <Badge tone={f.details ? "green" : "blue"}>{f.details ? "Filled in" : "Uploaded"}</Badge>
+                    </td>
+                    <td>{f.details?.cardType || "—"}</td>
+                    <td>{f.details?.doriType ? `${f.details.doriType}${f.details.doriCount ? " · " + f.details.doriCount : ""}` : "—"}</td>
+                    <td>{toDMY(f.details?.date || String(f.createdAt || "").slice(0, 10))}</td>
+                    <td className="row-actions">
+                      <IconButton icon="eye" label={`View order form for ${f.schoolName}`} onClick={() => setView(f)} />
+                      <IconButton icon="download" label={`Download order form for ${f.schoolName}`} onClick={() => download(f)} />
+                      {canManage && f.details && <IconButton icon="edit" label={`Edit order form for ${f.schoolName}`} onClick={() => setEdit(f)} />}
+                      {canManage && <IconButton icon="trash" label={`Delete order form for ${f.schoolName}`} onClick={() => remove(f)} />}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <Empty
+            title={query ? "No order forms match" : "No order forms yet"}
+            text={canManage ? "Use New order form to fill in the CtC order form for a school, or upload the signed paper form." : "Your agent will add the order form here."}
+          />
+        )}
+      </Panel>
       {edit && <OrderFormEditor ctx={ctx} schools={schools} form={edit === "new" ? null : edit} onClose={() => setEdit(null)} />}
       {view && <OrderFormView form={view} onClose={() => setView(null)} />}
-    </Panel>
+    </>
   );
 }

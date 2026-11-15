@@ -23,7 +23,7 @@ import {
   Guide,
   Activity,
 } from "./pages/Management.jsx";
-import { PrintOrders, Designs, PhotoUploads } from "./pages/Production.jsx";
+import { PrintOrders, Designs, PhotoUploads, OrderFormsPage } from "./pages/Production.jsx";
 import StudentPortal from "./pages/StudentPortal.jsx";
 import PortalLive from "./pages/PortalLive.jsx";
 import { Login, Onboard } from "./pages/Auth.jsx";
@@ -40,6 +40,7 @@ const pageNames = {
   staff: "Staff directory",
   classes: "Classes & sections",
   promotion: "Promote students",
+  orders: "Order forms",
   designs: "Card & lanyard designs",
   printing: "ID card printing",
   photos: "Photo uploads",
@@ -68,6 +69,7 @@ const menuItems = {
     ],
     [
       "PRODUCTION",
+      ["orders", "file"],
       ["designs", "design"],
       ["printing", "print"],
       ["photos", "image"],
@@ -86,6 +88,7 @@ const menuItems = {
       "PRODUCTION",
       ["printing", "print"],
       ["photos", "image"],
+      ["orders", "file"],
       ["designs", "design"],
     ],
     ["MANAGEMENT", ["sessions", "calendar"], ["activity", "clock"]],
@@ -96,6 +99,7 @@ const menuItems = {
       "PRODUCTION",
       ["photos", "fileUp"],
       ["printing", "print"],
+      ["orders", "file"],
       ["designs", "design"],
     ],
   ],
@@ -107,6 +111,7 @@ const menuItems = {
       ["sessions", "calendar"],
       ["photos", "fileUp"],
       ["printing", "print"],
+      ["orders", "file"],
     ],
   ],
 };
@@ -522,6 +527,9 @@ function App({ live = false, initialData = null }) {
       break;
     case "printing":
       content = <PrintOrders ctx={ctx} />;
+      break;
+    case "orders":
+      content = <OrderFormsPage ctx={ctx} />;
       break;
     default:
       content = <Dashboard ctx={ctx} />;

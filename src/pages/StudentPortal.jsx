@@ -231,7 +231,7 @@ export default function StudentPortal({ ctx }) {
               </p>
               <div className="receipt">
                 <span>REFERENCE NUMBER</span>
-                <strong>{original.id}</strong>
+                <strong>{original.admission || String(original.id).slice(-6).toUpperCase()}</strong>
                 <Badge>
                   {data.students.find((s) => s.id === original.id)?.status ||
                     "In review"}

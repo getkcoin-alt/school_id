@@ -610,7 +610,8 @@ export function ReviewQueue({ ctx }) {
                 <div>
                   <h2>{current.name}</h2>
                   <p>
-                    {current.id} · {school.name}
+                    {current.admission ? `Adm. no. ${current.admission} · ` : ""}
+                    {school.name}
                   </p>
                 </div>
                 <Badge>{current.status}</Badge>
