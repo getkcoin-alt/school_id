@@ -415,3 +415,9 @@ export function createSeed() {
     photoLibrary: [],
   };
 }
+
+// ---- Merged from the preview branch (phone preview helpers) ----
+export const PARENT_PREFIXES = {
+  fatherPrefix: ["Mr.", "Sh.", "Dr.", "Md.", "Late Sh."],
+  motherPrefix: ["Mrs.", "Smt.", "Dr.", "Ms.", "Late Smt."],
+};

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { createContext, useContext, useEffect, useRef, useState } from "react";
 import {
   EyeOff,
   UserCog,
@@ -71,7 +71,8 @@ import {
   ChevronLeft,
   RotateCcw,
 } from "lucide-react";
-import { initials, cardPDF, toDMY, fromDMY } from "./lib.js";
+import { initials, cardPDF, toDMY, fromDMY, parentName } from "./lib.js";
+import { PARENT_PREFIXES } from "./data.js";
 const icons = {
   eyeOff: EyeOff,
   logOut: LogOut,
@@ -733,5 +734,65 @@ export function PDFProofButton({ students, school, design, disabled = false }) {
       )}
       {error && <small className="error">{error}</small>}
     </span>
+  );
+}
+
+// ---- Merged from the preview branch (phone preview helpers) ----
+export function ParentPrefixSelect({ type, value = "", onChange }) {
+  const options = PARENT_PREFIXES[type];
+  return (
+    <select value={value} onChange={(e) => onChange(e.target.value)}>
+      <option value="">No prefix</option>
+      {value && !options.includes(value) && <option>{value}</option>}
+      {options.map((option) => (
+        <option key={option}>{option}</option>
+      ))}
+    </select>
+  );
+}
+
+export function ExtraField({ field, value = "", error, onChange }) {
+  return (
+    <Field label={field.name} required={field.required} error={error}>
+      {field.type === "select" ? (
+        <select
+          value={value}
+          required={field.required}
+          onChange={(e) => onChange(e.target.value)}
+        >
+          <option value="">Choose an option</option>
+          {value && !field.options.includes(value) && (
+            <option value={value}>{value} (previous)</option>
+          )}
+          {field.options.map((option) => (
+            <option key={option}>{option}</option>
+          ))}
+        </select>
+      ) : (
+        <input
+          value={value}
+          required={field.required}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      )}
+    </Field>
+  );
+}
+
+export const FeedbackContext = createContext(null);
+
+export function Feedback({ inline = false }) {
+  const feedback = useContext(FeedbackContext);
+  if (!feedback) return null;
+  const { message, tone, dismiss } = feedback;
+  return (
+    <div
+      role="status"
+      className={`${inline ? "modal-feedback" : "toast"} ${tone}`}
+    >
+      <Icon name={tone === "error" ? "alert" : "checkCircle"} size={20} />
+      <span>{message}</span>
+      <IconButton icon="x" label="Dismiss message" onClick={dismiss} />
+    </div>
   );
 }

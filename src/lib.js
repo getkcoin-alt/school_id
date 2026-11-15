@@ -5,6 +5,8 @@ import {
   LOCKED_FIELDS,
   FATHER_PREFIXES,
   MOTHER_PREFIXES,
+  STAFF_FIELDS,
+  PARENT_PREFIXES,
 } from "./data.js";
 export function loadData() {
   try {
@@ -110,87 +112,10 @@ export function validateStudent(s, fields) {
     errors.dob = "Date of birth cannot be in the future.";
   return errors;
 }
-const norm = (v) => String(v ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
-const sameChild = (a, b) =>
-  norm(a.name) === norm(b.name) &&
-  norm(a.father) === norm(b.father) &&
-  (a.dob || "") === (b.dob || "");
-/** Excel serial numbers and DD/MM/YYYY become ISO dates. */
-export function sheetDate(v) {
-  if (v === undefined || v === null || v === "") return "";
-  if (typeof v === "number" && v > 1000 && v < 80000)
-    return new Date(Date.UTC(1899, 11, 30) + v * 86400000).toISOString().slice(0, 10);
-  const s = String(v).trim();
-  const m = s.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})$/);
-  if (m) return `${m[3].length === 2 ? "20" + m[3] : m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
-  return /^\d{4}-\d{2}-\d{2}/.test(s) ? s.slice(0, 10) : "";
-}
-/**
- * Reads the agreed upload sheet (SRNO, PHOTO, NAME, PREFIXF, FATHER, PREFIXM, MOTHER,
- * DOB, CLASS, SECTION, MOBILE, ADDRESS, ADMNO, SRN) and older templates. Duplicates
- * by admission number, or by name + father + date of birth, are skipped.
- */
-export function parseImport(rows, school, existing, session = "2026–27") {
-  let duplicates = 0,
-    invalid = 0;
-  const pool = existing.filter((s) => s.school === school);
-  const seen = new Set(pool.map((s) => String(s.admission)).filter(Boolean));
-  const students = [];
-  for (const row of rows) {
-    const r = Object.fromEntries(
-      Object.entries(row).map(([k, v]) => [
-        k.toLowerCase().replace(/[^a-z]/g, ""),
-        v,
-      ]),
-    );
-    const t = (...keys) => {
-      for (const k of keys) {
-        const v = r[k];
-        if (v !== undefined && String(v).trim() !== "") return String(v).trim();
-      }
-      return "";
-    };
-    const name = t("name", "studentname");
-    const admission = t("admno", "admission", "admissionnumber", "admissionno");
-    const email = t("email", "emailaddress");
-    const classNo = t("class", "classno");
-    if (!name || !classNo || (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) {
-      invalid++;
-      continue;
-    }
-    const student = {
-      id: uid("ST"),
-      school,
-      name,
-      admission,
-      email,
-      photoNo: t("photo", "photono"),
-      fatherPrefix: t("prefixf", "fatherprefix"),
-      father: t("father", "fathername"),
-      motherPrefix: t("prefixm", "motherprefix"),
-      mother: t("mother", "mothername"),
-      dob: sheetDate(r.dob ?? r.dateofbirth),
-      phone: t("mobile", "phone", "contactnumber", "contactno").replace(/\D/g, "").slice(-10),
-      classNo,
-      section: t("section").toUpperCase(),
-      address: t("address"),
-      srn: t("srn"),
-      status: "Draft",
-      active: true,
-      photo: "",
-      photoSource: "",
-      session,
-      custom: {},
-    };
-    if ((admission && seen.has(admission)) || [...pool, ...students].some((s) => (s.father || s.dob) && sameChild(s, student))) {
-      duplicates++;
-      continue;
-    }
-    if (admission) seen.add(admission);
-    students.push(student);
-  }
-  return { students, duplicates, invalid };
-}
+
+
+
+
 /** Spreadsheet in the agreed column order, in capitals, without disabled fields. */
 export async function exportSheet(rows, fields, name = "students.xlsx") {
   const XLSX = await import("xlsx");
@@ -415,4 +340,512 @@ export const STAFF_SERVER_FIELDS = ["name", "role", "phone", "email", "address",
 export const STAFF_LOCKED = ["name", "role"];
 export function staffRequiredKeys(data, schoolId) {
   return data.staffFieldRequired?.[schoolId] || ["name", "role", "email", "phone", "address"];
+}
+
+// ---- Merged from the preview branch (phone preview helpers) ----
+export function readPreviewData(serialized) {
+  const stored = JSON.parse(serialized);
+  if (stored?.version !== 1) return null;
+  const data = { ...createSeed(), ...stored };
+  const prefixKeys = Object.keys(PARENT_PREFIXES);
+  if (data.studentSheetFieldsVersion !== 1) {
+    data.enabledFields = [
+      ...new Set([...data.enabledFields, "photoNo", "srn"]),
+    ];
+    data.fieldScope = Object.fromEntries(
+      Object.entries(data.fieldScope).map(([id, keys]) => [
+        id,
+        [...new Set([...keys, "photoNo", "srn"])],
+      ]),
+    );
+    data.studentSheetFieldsVersion = 1;
+  }
+  if (prefixKeys.every((key) => data.enabledFields.includes(key))) return data;
+  const addPrefixes = (keys) => [...new Set([...keys, ...prefixKeys])];
+  return {
+    ...data,
+    enabledFields: addPrefixes(data.enabledFields),
+    fieldScope: Object.fromEntries(
+      Object.entries(data.fieldScope).map(([school, keys]) => [
+        school,
+        addPrefixes(keys),
+      ]),
+    ),
+  };
+}
+
+export function parentName(student, parent) {
+  const name = student?.[parent]?.trim();
+  const prefix = student?.[`${parent}Prefix`]?.trim();
+  if (!name) return "";
+  if (!prefix || name.toLowerCase().startsWith(`${prefix.toLowerCase()} `))
+    return name;
+  return `${prefix} ${name}`;
+}
+
+export const firstName = (name = "") =>
+  name
+    .trim()
+    .split(/\s+/)
+    .find(
+      (part) => part && !/^(mr|mrs|ms|miss|dr|prof|shri|smt)\.?$/i.test(part),
+    ) || "there";
+
+export const lockedFields = (staff) =>
+  staff ? ["name", "role"] : ["name", "classNo"];
+
+export function schoolFields(data, school, staff = false) {
+  const definitions = staff ? STAFF_FIELDS : FIELDS;
+  const enabled = staff
+    ? data.staffFieldScope?.[school]
+    : data.fieldScope?.[school] || data.enabledFields;
+  const required = (staff ? data.staffFieldRequired : data.fieldRequired)?.[
+    school
+  ];
+  const locked = lockedFields(staff);
+  return definitions
+    .filter(
+      ([key]) => !enabled || enabled.includes(key) || locked.includes(key),
+    )
+    .map(([key, label, type, defaultRequired]) => [
+      key,
+      label,
+      type,
+      locked.includes(key) ||
+        (required ? required.includes(key) : defaultRequired),
+    ]);
+}
+
+export function cardRecord(data, school, record, staff = false) {
+  if (!record) return record;
+  const fields = schoolFields(data, school, staff);
+  const enabled = new Set(fields.map(([key]) => key));
+  const definitions = staff ? STAFF_FIELDS : FIELDS;
+  const hidden = Object.fromEntries(
+    definitions.filter(([key]) => !enabled.has(key)).map(([key]) => [key, ""]),
+  );
+  const extras = schoolExtras(data, school, staff);
+  return {
+    ...record,
+    ...hidden,
+    custom: Object.fromEntries(
+      extras.map((field) => [field.name, record.custom?.[field.id] || ""]),
+    ),
+    cardFields: [...enabled],
+  };
+}
+
+export function schoolExtras(data, school, staff = false) {
+  return data.customFields.filter(
+    (field) =>
+      field.school === school &&
+      (field.audience === "staff") === staff &&
+      field.enabled !== false,
+  );
+}
+
+export function validateExtras(record, fields) {
+  return Object.fromEntries(
+    fields.flatMap((field) => {
+      const value = String(record.custom?.[field.id] || "").trim();
+      if (field.required && !value)
+        return [[`extra:${field.id}`, `Enter ${field.name.toLowerCase()}.`]];
+      if (value && field.type === "select" && !field.options.includes(value))
+        return [
+          [`extra:${field.id}`, `Choose a valid option for ${field.name}.`],
+        ];
+      return [];
+    }),
+  );
+}
+
+export const isNotSubmitted = (student) =>
+  ["Draft", "Invited"].includes(student.status);
+
+export function approvalError(student, fields, extras = []) {
+  if (!student.active) return "Activate this student before approving.";
+  if (
+    !student.photo ||
+    Object.keys({
+      ...validateStudent(student, fields),
+      ...validateExtras(student, extras),
+    }).length
+  )
+    return "Complete the required ID fields and add a photo before approving.";
+  return "";
+}
+
+export function approvedStudent(student) {
+  return {
+    ...student,
+    status: "Approved",
+    note: "",
+    approvedAt: new Date().toISOString(),
+  };
+}
+
+export const photoNumber = (value) =>
+  String(value ?? "")
+    .trim()
+    .replace(/\.(jpe?g|png|webp)$/i, "")
+    .toUpperCase();
+
+export const photoLimit = 15 * 1024 * 1024;
+
+export function validPhoto(file) {
+  return (
+    file.size > 0 &&
+    file.size <= photoLimit &&
+    ["image/jpeg", "image/png", "image/webp"].includes(file.type)
+  );
+}
+
+export async function studentPhoto(file) {
+  const url = URL.createObjectURL(file);
+  try {
+    return await rasterPhoto(url);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+export async function exportStudents(rows, school, customFields, format) {
+  const filename = school.short || school.id;
+  if (format === "checklist") {
+    const { jsPDF } = await import("jspdf");
+    const doc = new jsPDF();
+    for (const [index, student] of rows.entries()) {
+      if (index % 7 === 0) {
+        if (index > 0) doc.addPage();
+        doc.setFontSize(15);
+        doc.text(doc.splitTextToSize(school.name, 175).slice(0, 1), 14, 16);
+        doc.setFontSize(10);
+        doc.text("ID card checking sheet", 14, 23);
+        doc.text(
+          "Reviewed by: ___________________   Date: __________",
+          14,
+          283,
+        );
+      }
+      const y = 32 + (index % 7) * 34;
+      if (student.photo) {
+        const photo = await rasterPhoto(student.photo).catch(() => null);
+        if (photo) doc.addImage(photo, "JPEG", 14, y, 19, 24);
+      }
+      doc.text(doc.splitTextToSize(student.name, 105).slice(0, 1), 38, y + 6);
+      doc.text(
+        `ADM ${student.admission} | Class ${student.classNo} ${student.section}`,
+        38,
+        y + 12,
+      );
+      doc.text(`Status: ${student.status}`, 38, y + 19);
+      doc.rect(154, y + 5, 4, 4);
+      doc.text("Checked", 160, y + 8);
+      doc.line(14, y + 29, 196, y + 29);
+    }
+    download(
+      `${filename}-checking-sheet.pdf`,
+      doc.output("blob"),
+      "application/pdf",
+    );
+    return;
+  }
+
+  const XLSX = await import("xlsx");
+  const workbook = XLSX.utils.book_new();
+  const columns = [
+    "SRNO",
+    "PHOTO",
+    "NAME",
+    "PREFIXF",
+    "FATHER",
+    "PREFIXM",
+    "MOTHER",
+    "DOB",
+    "CLASS",
+    "SECTION",
+    "MOBILE",
+    "ADDRESS",
+    "ADMNO",
+    "SRN",
+    "EMAIL",
+    "GENDER",
+    "ADMDATE",
+    "BLOOD",
+    "TRANSPORT",
+  ];
+  const keys = [
+    "name",
+    "fatherPrefix",
+    "father",
+    "motherPrefix",
+    "mother",
+    "dob",
+    "classNo",
+    "section",
+    "phone",
+    "address",
+    "admission",
+    "srn",
+    "email",
+    "gender",
+    "admissionDate",
+    "blood",
+    "transport",
+  ];
+  const sorted = [...rows].sort(
+    (a, b) =>
+      String(a.classNo || "").localeCompare(String(b.classNo || ""), "en", {
+        numeric: true,
+      }) ||
+      String(a.section || "").localeCompare(String(b.section || "")) ||
+      a.name.localeCompare(b.name),
+  );
+  const used = new Set();
+  const exportRows = sorted.map((student, index) => {
+    const stem = (
+      photoNumber(student.photoNo || student.admission || student.id) ||
+      String(index + 1)
+    ).replace(/[^a-z0-9_-]/gi, "_");
+    let photo = stem;
+    let suffix = 2;
+    while (used.has(photo)) photo = `${stem}-${suffix++}`;
+    used.add(photo);
+    return {
+      student,
+      photo,
+      row: [
+        index + 1,
+        photo,
+        ...keys.map((key) => student[key] || ""),
+        ...customFields.map(({ id }) => student.custom?.[id] || ""),
+      ],
+    };
+  });
+  XLSX.utils.book_append_sheet(
+    workbook,
+    XLSX.utils.aoa_to_sheet([
+      [...columns, ...customFields.map(({ name }) => name)],
+      ...exportRows.map(({ row }) => row),
+    ]),
+    "Students",
+  );
+  const spreadsheet = XLSX.write(workbook, { type: "array", bookType: "xlsx" });
+  if (format === "excel") {
+    download(
+      `${filename}-students.xlsx`,
+      spreadsheet,
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    return;
+  }
+
+  const { zipSync } = await import("fflate");
+  const contents = { "students.xlsx": new Uint8Array(spreadsheet) };
+  for (const { student, photo: basename } of exportRows) {
+    if (!student.photo) continue;
+    const photo = await rasterPhoto(student.photo).catch(() => null);
+    if (!photo) continue;
+    const bytes = await (await fetch(photo)).arrayBuffer();
+    contents[`photos/${basename}.jpg`] = new Uint8Array(bytes);
+  }
+  download(
+    `${filename}-students-and-photos.zip`,
+    zipSync(contents, { level: 0 }),
+    "application/zip",
+  );
+}
+
+export const batchSession = (batch) =>
+  batch.session ||
+  batch.snapshot?.[0]?.session ||
+  batch.staffSnapshot?.[0]?.session ||
+  academicYear(new Date(batch.date));
+
+export function printRounds(batches, school, session, kind) {
+  const allowed =
+    school[kind === "staff" ? "staffRounds" : "studentRounds"] ?? 3;
+  const used = batches.filter(
+    (batch) =>
+      batch.school === school.id &&
+      batchSession(batch) === session &&
+      batch.status !== "Cancelled" &&
+      (batch.kind
+        ? batch.kind === kind
+        : kind === "staff"
+          ? batch.staffIds?.length || batch.staffSnapshot?.length
+          : batch.studentIds?.length ||
+            batch.snapshot?.length ||
+            (!batch.staffIds?.length && !batch.staffSnapshot?.length)),
+  ).length;
+  return { allowed, used, remaining: Math.max(0, allowed - used) };
+}
+
+export function sessionsFor(data, schoolId) {
+  return data.schoolSessions?.[schoolId] || data.sessions;
+}
+
+export function currentSession(data, schoolId) {
+  const list = sessionsFor(data, schoolId);
+  return (
+    list.find((session) => session.active)?.name ||
+    list[0]?.name ||
+    academicYear()
+  );
+}
+
+// ---- Merged from the preview branch (phone preview helpers) ----
+/** Names are printed in capitals on ID cards. */
+const upper = (v) => String(v || "").replace(/\s+/g, " ").trim().toUpperCase();
+
+function importPrefix(key, value = "") {
+  const comparable = (text) =>
+    text.toLowerCase().replaceAll(".", "").replace(/\s+/g, " ").trim();
+  return (
+    PARENT_PREFIXES[key].find(
+      (option) => comparable(option) === comparable(value),
+    ) || value
+  );
+}
+
+export function sheetDate(value) {
+  if (value instanceof Date)
+    return Number.isNaN(+value) ? "" : value.toISOString().slice(0, 10);
+  const input = String(value ?? "").trim();
+  if (/^\d{5}(?:\.\d+)?$/.test(input)) {
+    let days = Math.floor(Number(input));
+    return new Date(Date.UTC(1899, 11, 30) + days * 86400000)
+      .toISOString()
+      .slice(0, 10);
+  }
+  const dmy = input.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{2}|\d{4})$/);
+  const iso = dmy
+    ? `${dmy[3].length === 2 ? "20" + dmy[3] : dmy[3]}-${dmy[2].padStart(2, "0")}-${dmy[1].padStart(2, "0")}`
+    : input.slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return "";
+  const date = new Date(iso + "T00:00:00Z");
+  return !Number.isNaN(+date) && date.toISOString().slice(0, 10) === iso
+    ? iso
+    : "";
+}
+
+function identityKey(student) {
+  const norm = (value) =>
+    String(value ?? "")
+      .trim()
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}]/gu, "");
+  if (!student.father && !student.dob) return "";
+  return [
+    norm(student.name),
+    norm(student.father),
+    sheetDate(student.dob),
+  ].join("|");
+}
+
+export function parseImport(
+  rows,
+  school,
+  existing,
+  session = "2026–27",
+  customFields = [],
+) {
+  let duplicates = 0,
+    invalid = 0;
+  const pool = existing.filter(
+    (s) => s.school === school && s.session === session,
+  );
+  const seen = new Set(
+    pool
+      .map((s) =>
+        String(s.admission || "")
+          .trim()
+          .toLowerCase(),
+      )
+      .filter(Boolean),
+  );
+  const identities = new Set(pool.map(identityKey).filter(Boolean));
+  const students = [];
+  const normalize = (heading) =>
+    heading.toLowerCase().replace(/[^a-z0-9]/g, "");
+  for (const row of rows) {
+    const r = Object.fromEntries(
+      Object.entries(row).map(([k, v]) => [
+        normalize(k),
+        String(v ?? "").trim(),
+      ]),
+    );
+    const name = r.name || r.studentname || r.fullname;
+    const admission =
+      r.admission || r.admissionnumber || r.admissionno || r.admno;
+    const email = r.email || r.emailaddress;
+    const classNo = r.class || r.classno || r.classname;
+    if (
+      !name ||
+      (!classNo && !admission) ||
+      (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+    ) {
+      invalid++;
+      continue;
+    }
+    const candidate = {
+      id: uid("ST"),
+      school,
+      name: upper(name),
+      admission: admission || "",
+      photoNo: photoNumber(r.photo || r.photono || r.photonumber),
+      srn: r.srn || "",
+      email: email || "",
+      phone: (
+        r.phone ||
+        r.contactnumber ||
+        r.contactno ||
+        r.mobilenumber ||
+        r.mobile ||
+        ""
+      )
+        .replace(/\D/g, "")
+        .slice(-10),
+      classNo: classNo || "6",
+      section: (r.section || "").toUpperCase(),
+      // An empty prefix defaults to Mr. / Mrs. when the parent's name is given.
+      fatherPrefix: importPrefix(
+        "fatherPrefix",
+        r.prefixf || r.fatherprefix || r.prefixfather || (r.father || r.fathername || r.fathersname ? "Mr." : ""),
+      ),
+      father: upper(r.father || r.fathername || r.fathersname || ""),
+      motherPrefix: importPrefix(
+        "motherPrefix",
+        r.prefixm || r.motherprefix || r.prefixmother || (r.mother || r.mothername || r.mothersname ? "Mrs." : ""),
+      ),
+      mother: upper(r.mother || r.mothername || r.mothersname || ""),
+      address: r.address || r.residentialaddress || "",
+      gender: r.gender || "",
+      dob: sheetDate(r.dob || r.dateofbirth),
+      blood: (r.blood || r.bloodgroup || "").replace("-", "−"),
+      admissionDate: sheetDate(r.admissiondate || r.admdate),
+      transport: r.transport || r.transportroute || "",
+      status: "Draft",
+      active: true,
+      photo: "",
+      photoSource: "",
+      session,
+      custom: Object.fromEntries(
+        customFields.map(({ id, name }) => [id, r[normalize(name)] || ""]),
+      ),
+    };
+    const admissionKey = candidate.admission.toLowerCase();
+    const identity = identityKey(candidate);
+    if (
+      (admissionKey && seen.has(admissionKey)) ||
+      (identity && identities.has(identity))
+    ) {
+      duplicates++;
+      continue;
+    }
+    if (admissionKey) seen.add(admissionKey);
+    if (identity) identities.add(identity);
+    students.push(candidate);
+  }
+  return { students, duplicates, invalid };
 }
