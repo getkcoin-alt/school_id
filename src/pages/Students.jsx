@@ -76,15 +76,20 @@ export function StudentEditor({ ctx, student, onClose, onSaved }) {
   const usedBy = (no) =>
     no &&
     data.students.find((s) => s.id !== draft.id && s.school === school.id && s.session === draft.session && String(s.photoNo || "").trim().toUpperCase() === no);
+  // The photo no. is locked to the file name, unless that number is already taken:
+  // then it can be typed in by hand.
+  const [photoNoOpen, setPhotoNoOpen] = useState(false);
   const setPhoto = (photo, source, name) => {
     const no = photoName(name);
     const other = usedBy(no);
+    setPhotoNoOpen(Boolean(other));
     setDraft((d) => ({ ...d, photo, photoSource: source, captureAt: null, photoNo: no }));
     setErrors((e) => ({ ...e, photoNo: other ? `Photo no. ${no} is already used by ${other.name}.` : null }));
-    if (other) notify(`Photo no. ${no} is already used by ${other.name}. Choose another photo.`, "error");
+    if (other) notify(`Photo no. ${no} is already used by ${other.name}. Type a different photo no. or choose another photo.`, "error");
   };
   const pickLibrary = (p) => setPhoto(p.src, "School photo library", p.name);
   const clearPhoto = () => {
+    setPhotoNoOpen(false);
     setDraft((d) => ({ ...d, photo: "", photoSource: null, photoNo: "" }));
     setErrors((e) => ({ ...e, photoNo: null }));
   };
@@ -210,10 +215,21 @@ export function StudentEditor({ ctx, student, onClose, onSaved }) {
               label={label}
               required={required}
               error={errors[key]}
-              hint={key === "photoNo" && draft.photo ? "Taken from the photo's file name" : undefined}
+              hint={key === "photoNo" && draft.photo ? (photoNoOpen ? "Already used: type a different photo no." : "Taken from the photo's file name") : undefined}
               className={key === "address" ? "span-two" : ""}
             >
-              {key === "photoNo" && draft.photo ? (
+              {key === "photoNo" && draft.photo && photoNoOpen ? (
+                <input
+                  className="upper"
+                  value={draft.photoNo || ""}
+                  onChange={(e) => {
+                    const no = e.target.value.toUpperCase();
+                    const other = usedBy(no.trim());
+                    setDraft((d) => ({ ...d, photoNo: no }));
+                    setErrors((er) => ({ ...er, photoNo: other ? `Photo no. ${no.trim()} is already used by ${other.name}.` : null }));
+                  }}
+                />
+              ) : key === "photoNo" && draft.photo ? (
                 <input value={draft.photoNo || ""} readOnly className="readonly" title="Taken from the photo's file name" />
               ) : type === "date" ? (
                 <DateInput value={draft[key] || ""} max={key === "dob" ? new Date().toISOString().slice(0, 10) : undefined} onChange={(v) => change(key, v)} />
